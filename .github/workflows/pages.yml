@@ -5,20 +5,24 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+# No permissions by default; each job asks only for what it needs.
+permissions: {}
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
+  # Runs third-party code (npm install scripts, build tools), so it gets
+  # read-only access and cannot deploy.
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
@@ -36,9 +40,13 @@ jobs:
         with:
           path: dist
 
+  # Runs no project code; only this job can publish to Pages.
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

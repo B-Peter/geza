@@ -35,21 +35,23 @@ async function logout() {
       <span class="ico peach"><Icon name="sparkle" size={18} /></span>
       <div class="grow">
         <div class="name">Claude</div>
-        <div class="small muted">Your API key · {masked ?? "…"}</div>
+        <div class="small muted">{claude.MODEL}</div>
       </div>
-      <a class="btn secondary small" href="#/key">Change key</a>
     </div>
     <div class="row">
       <span class="ico blue"><Icon name="key" size={18} /></span>
       <div class="grow">
-        <div class="name">Model</div>
-        <div class="small muted">{claude.MODEL}</div>
+        <div class="name">API key</div>
+        <div class="small muted">Ends in {masked ? masked.slice(-4) : "…"}</div>
       </div>
-      <button class="btn secondary small" onclick={removeKey}>Remove</button>
+      <a class="btn secondary small" href="#/key">Change</a>
+      <button class="btn danger small" onclick={removeKey}>Remove</button>
     </div>
   </div>
   <p class="small muted note">
     Runs on your own Anthropic API key, billed to your Anthropic account. Stored encrypted and used only for your picks.
+    Removing it here only deletes it from this device; to cancel the key itself, delete it at
+    <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer">console.anthropic.com</a>.
   </p>
 
   <div class="label">Spotify</div>
@@ -63,6 +65,10 @@ async function logout() {
       <button class="btn secondary small" onclick={logout}>Log out</button>
     </div>
   </div>
+  <p class="small muted note">
+    Logging out deletes the login from this device. To take away the app's access completely, remove Géza at
+    <a href="https://www.spotify.com/account/apps/" target="_blank" rel="noopener noreferrer">spotify.com/account/apps</a>.
+  </p>
 
   <div class="label">More</div>
   <div class="card">
@@ -81,6 +87,7 @@ async function logout() {
 <style>
   .grow { flex: 1; min-width: 0; }
   .name { font-weight: 600; }
+  .note a { text-decoration: underline; }
   .note { margin: 8px 8px 0; }
   .ico { width: 34px; height: 34px; flex: none; border-radius: 11px; display: flex; align-items: center; justify-content: center; }
   .peach { background: #ffb08f; }

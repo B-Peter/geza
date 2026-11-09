@@ -79,3 +79,36 @@ test("flow: create playlists, prepare and apply a swap", async ({ page }) => {
   ]);
   await expect(page.getByText("Driving updated in Spotify.")).toBeVisible();
 });
+
+test("security: refuses to run inside another site's frame", async ({ page }) => {
+  // Parent page on the same server (browsers block blank or public pages from
+  // framing a local address).
+  await page.goto("./");
+  await page.evaluate(() => {
+    document.body.innerHTML = '<iframe src="./" width="390" height="600"></iframe>';
+  });
+  // Two safe outcomes: the frame redirects the parent to the app (allowed for
+  // same-origin frames), or it blanks itself. Never a usable app inside a frame.
+  await expect
+    .poll(async () => {
+      const frame = page.frames().find((f) => f !== page.mainFrame());
+      if (!frame) return "parent redirected";
+      const children = await frame.evaluate(() => document.documentElement.childElementCount).catch(() => -1);
+      return children === 0 ? "frame blank" : "frame still showing";
+    })
+    .toMatch(/parent redirected|frame blank/);
+});
+
+test("security: the Spotify login asks only for the scopes the app uses", async ({ page }) => {
+  await page.goto("./");
+  await page.getByLabel("Spotify client ID").fill("test-client-id");
+  const auth = page.waitForRequest((r) => r.url().startsWith("https://accounts.spotify.com/authorize"));
+  await page.route(/^https:\/\/accounts\.spotify\.com\//, (route) => route.fulfill({ body: "ok" }));
+  await page.getByRole("button", { name: "Continue with Spotify" }).click();
+  const url = new URL((await auth).url());
+  expect(url.searchParams.get("scope")?.split(" ").sort()).toEqual(
+    ["playlist-modify-private", "playlist-read-private", "user-read-private", "user-top-read"].sort(),
+  );
+  expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+  expect(url.searchParams.get("state")).toMatch(/^[A-Za-z0-9._~-]{16}$/);
+});

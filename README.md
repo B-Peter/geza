@@ -32,7 +32,7 @@ Each user creates their own key at https://console.anthropic.com: add credit, se
 ## Develop
 
 ```bash
-npm ci
+npm ci             # needs npm 8.3+ for the security overrides (older npm: npx npm@11 ci)
 npm run dev        # http://127.0.0.1:8080/  (use 127.0.0.1, not localhost)
 npm run lint       # Biome
 npm run check      # svelte-check (types)

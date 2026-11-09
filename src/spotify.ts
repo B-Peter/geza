@@ -9,17 +9,14 @@ const TOKEN_URL = "https://accounts.spotify.com/api/token";
 const API = "https://api.spotify.com/v1";
 export const MARKET = "HU";
 
+// Only what the app uses today. Milestone 4 (listening history) will add
+// user-library-read and user-read-recently-played; the car release will add
+// the playback scopes. Each addition means logging in again.
 const SCOPES = [
-  "user-read-private",
-  "playlist-read-private",
-  "playlist-modify-private",
-  "playlist-modify-public",
-  "user-library-read",
-  "user-top-read",
-  "user-read-recently-played",
-  "user-read-playback-state",
-  "user-modify-playback-state",
-  "user-read-currently-playing",
+  "user-read-private", // /me: country and Premium status
+  "user-top-read", // top tracks and artists as taste signals
+  "playlist-read-private", // read the mix playlists (they are private)
+  "playlist-modify-private", // create and update them
 ].join(" ");
 
 const CLIENT_ID_KEY = "ps.spotifyClientId";
@@ -91,10 +88,17 @@ function base64url(bytes: ArrayBuffer): string {
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/** Uniformly random string from the PKCE alphabet (rejection sampling, no modulo bias). */
 function randomString(length: number): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
-  const values = crypto.getRandomValues(new Uint8Array(length));
-  return Array.from(values, (v) => chars[v % chars.length]).join("");
+  const limit = 256 - (256 % chars.length);
+  let out = "";
+  while (out.length < length) {
+    for (const v of crypto.getRandomValues(new Uint8Array(length))) {
+      if (v < limit && out.length < length) out += chars[v % chars.length];
+    }
+  }
+  return out;
 }
 
 export async function startLogin(): Promise<void> {
@@ -145,6 +149,22 @@ async function tokenRequest(body: Record<string, string>): Promise<TokenResponse
 }
 
 /**
+ * Where to go after login: only another page of this app (same origin,
+ * same folder). Anything else is ignored.
+ */
+function safeReturnTo(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    const home = new URL(redirectUri());
+    const sameApp = url.origin === home.origin && url.pathname.startsWith(home.pathname);
+    return sameApp && url.pathname !== location.pathname ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Call on page load. Finishes the OAuth round trip if this load is the
  * callback. Returns "done" (logged in, may navigate back), or null.
  */
@@ -169,9 +189,8 @@ export async function handleRedirect(): Promise<"done" | null> {
     code_verifier: saved.verifier,
   });
   await saveTokens(json);
-  if (saved.returnTo && new URL(saved.returnTo).pathname !== location.pathname) {
-    location.assign(saved.returnTo);
-  }
+  const back = safeReturnTo(saved.returnTo);
+  if (back) location.assign(back);
   return "done";
 }
 

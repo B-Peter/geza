@@ -29,8 +29,11 @@ export async function removeKey(): Promise<void> {
 /** Checks the key with a Models API lookup (no tokens spent), then saves it. */
 export async function testAndSaveKey(input: string): Promise<void> {
   const apiKey = input.trim();
-  if (!apiKey.startsWith("sk-ant-"))
-    throw new Error("That doesn't look like an Anthropic API key (sk-ant-…).");
+  // Admin keys can manage the whole Anthropic organization; never keep one in a browser.
+  if (apiKey.startsWith("sk-ant-admin"))
+    throw new Error("That's an admin key. Create a regular API key just for this app instead.");
+  if (!apiKey.startsWith("sk-ant-api"))
+    throw new Error("That doesn't look like an Anthropic API key (sk-ant-api…).");
   try {
     await client(apiKey).models.retrieve(MODEL);
   } catch (e) {

@@ -1,3 +1,5 @@
+import { framed } from "../frame-guard.ts";
+if (framed()) throw new Error("Refusing to run inside a frame.");
 import "./spike.css";
 // Milestone 1 spike: go / no-go checks for Spotify and Claude from an
 // installed PWA. Each check logs what worked and what failed.
