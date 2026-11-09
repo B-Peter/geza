@@ -24,7 +24,14 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run lint
+      - run: npm run check
+      - run: npm test
       - run: npm run build
+        env:
+          # Public by design (PKCE, no client secret). Set it under
+          # Settings → Secrets and variables → Actions → Variables.
+          VITE_SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: dist

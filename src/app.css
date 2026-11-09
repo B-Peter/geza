@@ -1,0 +1,188 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/bricolage-grotesque";
+
+:root {
+  --ink: #14130f;
+  --bg: #f4f1ea;
+  --muted: #6b675d;
+  --line: #e6e1d6;
+  --lime: #d7f75b;
+  --white: #ffffff;
+  --danger: #b3300e;
+  --display: "Bricolage Grotesque Variable", -apple-system, system-ui, sans-serif;
+  --body: "Inter Variable", -apple-system, system-ui, sans-serif;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px / 20px var(--body);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+.screen {
+  max-width: 520px;
+  margin: 0 auto;
+  min-height: 100dvh;
+  padding: calc(64px + var(--safe-top)) 20px calc(120px + var(--safe-bottom));
+}
+
+h1 {
+  margin: 0;
+  font: 800 36px / 40px var(--display);
+  letter-spacing: -0.02em;
+}
+
+.lead {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  line-height: 21px;
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.label {
+  margin: 18px 0 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.card {
+  background: var(--white);
+  border-radius: 28px;
+  box-shadow: 0 1px 0 var(--line);
+  overflow: hidden;
+}
+
+.row {
+  min-height: 56px;
+  padding: 8px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.row + .row {
+  border-top: 1px solid var(--line);
+}
+
+.btn {
+  height: 56px;
+  width: 100%;
+  border: none;
+  border-radius: 28px;
+  background: var(--ink);
+  color: var(--white);
+  font-size: 16px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.btn.secondary {
+  background: var(--white);
+  color: var(--ink);
+  border: 1.5px solid var(--line);
+}
+.btn.small {
+  height: 44px;
+  width: auto;
+  padding: 0 16px;
+  font-size: 13px;
+  border-radius: 22px;
+}
+.btn.danger {
+  background: transparent;
+  color: var(--danger);
+  border: 1.5px solid #e9b5a8;
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--lime);
+}
+
+.field {
+  width: 100%;
+  height: 48px;
+  border: none;
+  border-radius: 16px;
+  background: var(--bg);
+  padding: 0 14px;
+  font-size: 15px;
+  outline: none;
+}
+.field:focus-visible {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.actions {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px 20px calc(24px + var(--safe-bottom));
+  background: linear-gradient(to top, var(--bg) 70%, transparent);
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+/* Mix colours as classes: the production CSP forbids inline styles. */
+.mix-driving {
+  background: #ff6b3d;
+}
+.mix-working {
+  background: #5b86ff;
+}
+.mix-cooking {
+  background: #ffc83d;
+}
+.mix-home {
+  background: #34c791;
+}

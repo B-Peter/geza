@@ -1,9 +1,10 @@
+import "./spike.css";
 // Milestone 1 spike: go / no-go checks for Spotify and Claude from an
 // installed PWA. Each check logs what worked and what failed.
 
-import * as spotify from "./spotify.js";
-import * as claude from "./claude.js";
-import { requestPersistence } from "./store.js";
+import * as spotify from "../spotify.js";
+import * as claude from "../claude.js";
+import { requestPersistence } from "../store.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -75,13 +76,12 @@ $("btn-profile").addEventListener("click", (e) =>
 $("btn-playlist").addEventListener("click", (e) =>
   run(e.currentTarget, async () => {
     const me = await spotify.getProfile();
-    const { playlist, via, firstError } = await spotify.createPlaylist(
+    const playlist = await spotify.createPlaylist(
       me.id,
       "Playlist Studio test",
       "Created by the Playlist Studio spike. Safe to delete.",
     );
-    if (firstError) log(`First create attempt failed: ${firstError}`, "warn");
-    log(`Created playlist "${playlist.name}" via ${via}.`, "ok");
+    log(`Created playlist "${playlist.name}".`, "ok");
 
     const samples = [
       ["Queen", "Bohemian Rhapsody"],
@@ -92,15 +92,14 @@ $("btn-playlist").addEventListener("click", (e) =>
       const track = await spotify.findTrack(artist, title);
       if (track) {
         uris.push(track.uri);
-        log(`Search found: ${track.artists[0].name} – ${track.name}`, "ok");
+        log(`Search found: ${track.artist} – ${track.title}`, "ok");
       } else {
         log(`Search found nothing for ${artist} – ${title}`, "warn");
       }
     }
     if (!uris.length) throw new Error("No tracks to add.");
-    const added = await spotify.addToPlaylist(playlist.id, uris);
-    if (added.firstError) log(`First add attempt failed: ${added.firstError}`, "warn");
-    log(`Added ${uris.length} tracks via ${added.via}. Playlist writes work.`, "ok");
+    await spotify.addToPlaylist(playlist.id, uris);
+    log(`Added ${uris.length} tracks via /playlists/{id}/${localStorage.getItem("ps.playlistItemsPath")}. Playlist writes work.`, "ok");
     log(`Open it: ${playlist.external_urls?.spotify ?? playlist.uri}`, "info");
   }),
 );
@@ -127,26 +126,24 @@ $("btn-remove-key").addEventListener("click", (e) =>
 async function pickAndResolve(seed, tempo) {
   const input = {
     mix: "Driving",
-    mode: "Renew",
-    swap_pct: 100,
-    picks_wanted: 6,
+    mode: "renew",
+    remove_count: 0,
+    add_count: 6,
     tune: { mood: 4, tempo, energy: tempo, fresh: 3, vocals: 4 },
     loved: seed,
-    played_in_full: [],
-    never_played: [],
     blocked: [],
     locked: [],
     current: [],
     top_artists: [...new Set(seed.map((t) => t.artist))],
     note: "",
   };
-  const { picks, usage } = await claude.curate(input);
+  const picks = await claude.curate(input);
   const rows = [];
   for (const p of picks.add) {
     const track = await spotify.findTrack(p.artist, p.title);
     rows.push({ ...p, found: Boolean(track) });
   }
-  return { rows, usage };
+  return { rows };
 }
 
 function renderPicks(container, title, rows) {
@@ -174,14 +171,14 @@ $("btn-tune").addEventListener("click", (e) =>
     const out = $("tune-results");
     out.replaceChildren();
     const top = await spotify.getTopTracks(10);
-    const seed = top.map((t) => ({ artist: t.artists[0].name, title: t.name }));
+    const seed = top.map((t) => ({ artist: t.artist, title: t.title }));
     log(`Using ${seed.length} of your top tracks as loved songs.`, "info");
     for (const tempo of [2, 5]) {
       log(`Asking Claude for Driving picks at Tempo ${tempo}…`, "info");
-      const { rows, usage } = await pickAndResolve(seed, tempo);
+      const { rows } = await pickAndResolve(seed, tempo);
       renderPicks(out, `Tempo ${tempo}`, rows);
       log(
-        `Tempo ${tempo}: ${rows.length} picks, ${rows.filter((r) => r.found).length} on Spotify · ${usage.input_tokens} in / ${usage.output_tokens} out tokens`,
+        `Tempo ${tempo}: ${rows.length} picks, ${rows.filter((r) => r.found).length} on Spotify`,
         "ok",
       );
     }
@@ -193,7 +190,7 @@ $("btn-tune").addEventListener("click", (e) =>
 
 (async () => {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("sw.js").catch((e) => log(`Service worker: ${e.message}`, "warn"));
+    Promise.resolve().catch((e) => log(`Service worker: ${e.message}`, "warn"));
   }
   const persisted = await requestPersistence();
   log(persisted ? "Persistent storage granted." : "Persistent storage not granted (data may be evicted).", persisted ? "ok" : "warn");

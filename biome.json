@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "formatter": { "indentStyle": "space", "lineWidth": 110 },
+  "javascript": { "formatter": { "quoteStyle": "double" } },
+  "files": { "includes": ["src/**", "test/**", "*.ts", "!src/spike"] },
+  "overrides": [
+    {
+      "includes": ["**/*.svelte"],
+      "linter": {
+        "rules": {
+          "correctness": { "noUnusedImports": "off", "noUnusedVariables": "off" },
+          "style": { "useConst": "off", "useImportType": "off" }
+        }
+      }
+    },
+    {
+      "includes": ["test/**"],
+      "linter": { "rules": { "style": { "noNonNullAssertion": "off" } } }
+    }
+  ]
+}

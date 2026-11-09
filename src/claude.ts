@@ -1,34 +1,36 @@
-// Claude curator: called directly from the browser with the user's own key.
+// Claude curator, called directly from the browser with the user's own key.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { getSecret, setSecret, deleteSecret } from "./store.js";
+import { deleteSecret, getSecret, setSecret } from "./store.js";
 
-export const MODEL = "claude-opus-5-5";
+// Haiku: fast and low-cost, enough for picking a handful of songs.
+export const MODEL = "claude-haiku-5-5";
 const KEY_SECRET = "anthropicKey";
 
-function client(apiKey) {
+function client(apiKey: string): Anthropic {
   // The user's own key, kept encrypted on this device. dangerouslyAllowBrowser
   // sends the direct-browser-access header the API requires for CORS.
   return new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
 }
 
-export async function hasKey() {
-  return Boolean(await getSecret(KEY_SECRET));
+export async function hasKey(): Promise<boolean> {
+  return Boolean(await getSecret<string>(KEY_SECRET));
 }
 
-export async function maskedKey() {
-  const key = await getSecret(KEY_SECRET);
+export async function maskedKey(): Promise<string | null> {
+  const key = await getSecret<string>(KEY_SECRET);
   return key ? `${key.slice(0, 7)}…${key.slice(-4)}` : null;
 }
 
-export async function removeKey() {
+export async function removeKey(): Promise<void> {
   await deleteSecret(KEY_SECRET);
 }
 
-// Checks the key with a Models API lookup (no tokens spent), then saves it.
-export async function testAndSaveKey(apiKey) {
-  apiKey = apiKey.trim();
-  if (!apiKey.startsWith("sk-ant-")) throw new Error("That doesn't look like an Anthropic API key (sk-ant-…).");
+/** Checks the key with a Models API lookup (no tokens spent), then saves it. */
+export async function testAndSaveKey(input: string): Promise<void> {
+  const apiKey = input.trim();
+  if (!apiKey.startsWith("sk-ant-"))
+    throw new Error("That doesn't look like an Anthropic API key (sk-ant-…).");
   try {
     await client(apiKey).models.retrieve(MODEL);
   } catch (e) {
@@ -37,13 +39,17 @@ export async function testAndSaveKey(apiKey) {
   await setSecret(KEY_SECRET, apiKey);
 }
 
-export function describeError(e) {
-  if (e instanceof Anthropic.AuthenticationError) return "The key was rejected. Check it or create a new one.";
-  if (e instanceof Anthropic.PermissionDeniedError) return "The key isn't allowed to use this model.";
+export function describeError(e: unknown): string {
+  if (e instanceof Anthropic.AuthenticationError)
+    return "Your Claude key was rejected. Check it or create a new one.";
+  if (e instanceof Anthropic.PermissionDeniedError) return "Your Claude key isn't allowed to use this model.";
   if (e instanceof Anthropic.RateLimitError) return "Rate limited by Anthropic. Try again in a minute.";
   if (e instanceof Anthropic.APIConnectionError) return "Couldn't reach Anthropic. Check the connection.";
-  if (e instanceof Anthropic.APIError) return `Anthropic error ${e.status}: ${e.message}`;
-  return e?.message || String(e);
+  if (e instanceof Anthropic.APIError) {
+    if (e.status === 402 || /credit/i.test(e.message)) return "Your Anthropic account is out of credit.";
+    return `Anthropic error ${e.status}: ${e.message}`;
+  }
+  return e instanceof Error ? e.message : String(e);
 }
 
 export const SYSTEM_PROMPT = `You are the music curator for a personal playlist app. You pick songs
@@ -55,8 +61,10 @@ Rules:
   listener's history shows they like them.
 - Never suggest anything in "blocked" or already in "current".
 - Never replace anything in "locked".
-- Aim for about {{swap_pct}}% new tracks. Keep the mix's flow: tempo and
-  mood should fit the occasion and the Tune settings.
+- "remove" may only name songs from "current". Remove exactly
+  "remove_count" songs and add exactly "add_count" songs.
+- Keep the mix's flow: tempo and mood should fit the occasion and the
+  Tune settings.
 - Of the new picks: 50% familiar territory (artists close to the
   listener's loved tracks), 30% adjacent (same scene or era, new to
   them), 20% wildcard (different genre that still fits the mood).
@@ -65,7 +73,7 @@ Rules:
 - Max 1 new track per artist per run, max 2 per artist in the mix.
 - Wildcards must still match the Tune tempo and energy.
 - At most 25% of picks released in the last 3 years.
-- If the Owner's note conflicts with the history, follow the note.
+- If the owner's note conflicts with the history, follow the note.
 - If candidates are too few after filtering, return fewer picks, not
   worse ones.
 - Give each pick a reason of 12 words or fewer, plain language.
@@ -76,7 +84,45 @@ mood (1 gloomy, 5 euphoric), tempo (1 crawl, 5 racing), energy (1 calm,
 5 intense), fresh (1 known songs, 5 unheard), vocals (1 instrumental,
 5 singalong). They are your interpretation targets, not measurements.`;
 
-const PICK = {
+export interface Pick {
+  artist: string;
+  title: string;
+  reason: string;
+}
+
+export interface Picks {
+  remove: Pick[];
+  add: Pick[];
+}
+
+export interface Tune {
+  mood: number;
+  tempo: number;
+  energy: number;
+  fresh: number;
+  vocals: number;
+}
+
+interface SongRef {
+  artist: string;
+  title: string;
+}
+
+export interface CurateInput {
+  mix: string;
+  mode: "tweak" | "renew";
+  remove_count: number;
+  add_count: number;
+  tune: Tune;
+  loved: SongRef[];
+  blocked: SongRef[];
+  locked: SongRef[];
+  current: SongRef[];
+  top_artists: string[];
+  note: string;
+}
+
+const PICK_SCHEMA = {
   type: "object",
   properties: {
     artist: { type: "string" },
@@ -90,32 +136,26 @@ const PICK = {
 const PICKS_SCHEMA = {
   type: "object",
   properties: {
-    remove: { type: "array", items: PICK },
-    add: { type: "array", items: PICK },
+    remove: { type: "array", items: PICK_SCHEMA },
+    add: { type: "array", items: PICK_SCHEMA },
   },
   required: ["remove", "add"],
   additionalProperties: false,
 };
 
-// input: { mix, mode, swap_pct, picks_wanted, tune, loved, played_in_full,
-//          never_played, blocked, locked, current, top_artists, note }
-export async function curate(input) {
-  const apiKey = await getSecret(KEY_SECRET);
+export async function curate(input: CurateInput): Promise<Picks> {
+  const apiKey = await getSecret<string>(KEY_SECRET);
   if (!apiKey) throw new Error("Add your Claude key first.");
-  let response;
+  let response: Anthropic.Message;
   try {
-    response = await client(apiKey).beta.messages.create({
+    response = await client(apiKey).messages.create({
       model: MODEL,
       max_tokens: 16000,
-      // Refusal fallback: if a safety classifier declines, the API re-runs the
-      // request on a suitable model inside the same call.
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
       output_config: {
         effort: "medium",
         format: { type: "json_schema", schema: PICKS_SCHEMA },
       },
-      system: SYSTEM_PROMPT.replace("{{swap_pct}}", String(input.swap_pct)),
+      system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: JSON.stringify(input, null, 2) }],
     });
   } catch (e) {
@@ -123,18 +163,15 @@ export async function curate(input) {
   }
   if (response.stop_reason === "refusal") throw new Error("Claude declined this request.");
   if (response.stop_reason === "max_tokens") throw new Error("Claude's answer was cut off. Try again.");
-  const text = response.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("");
-  let picks;
+  const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+  let picks: Picks;
   try {
-    picks = JSON.parse(text);
+    picks = JSON.parse(text) as Picks;
   } catch {
     throw new Error("Claude returned invalid JSON.");
   }
   if (!Array.isArray(picks?.add) || !Array.isArray(picks?.remove)) {
     throw new Error("Claude's answer didn't match the expected shape.");
   }
-  return { picks, usage: response.usage, model: response.model };
+  return picks;
 }
