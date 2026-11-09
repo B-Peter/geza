@@ -1,0 +1,14 @@
+{
+  "name": "playlist-studio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/build.mjs --serve"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.7.0",
+    "esbuild": "0.28.2"
+  }
+}

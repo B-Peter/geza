@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://api.anthropic.com; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#F4F1EA">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Playlist Studio">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon.svg">
+<link rel="stylesheet" href="styles.css">
+<title>Playlist Studio · spike</title>
+</head>
+<body>
+<main>
+  <h1>Playlist Studio</h1>
+  <p class="muted">Milestone 1 spike: go / no-go checks. Results appear in the log below.</p>
+
+  <section class="card">
+    <div class="row"><h2>1 · Spotify</h2><span id="spotify-status" class="chip">…</span></div>
+    <label for="client-id">Spotify client ID</label>
+    <input id="client-id" autocomplete="off" spellcheck="false" placeholder="From developer.spotify.com/dashboard">
+    <p class="muted small">Redirect URI to register in the Spotify app: <code id="redirect-uri"></code></p>
+    <div class="buttons">
+      <button id="btn-save-client" class="secondary">Save ID</button>
+      <button id="btn-login">Log in with Spotify</button>
+      <button id="btn-profile" class="secondary">Read profile</button>
+      <button id="btn-playlist" class="secondary">Playlist write test</button>
+      <button id="btn-logout" class="secondary">Log out</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="row"><h2>2 · Claude key</h2><span id="claude-status" class="chip">…</span></div>
+    <label for="api-key">Anthropic API key</label>
+    <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+    <p class="muted small">Use a key made just for this app, with a low spend limit. Checked with a free model lookup, then stored encrypted on this device only.</p>
+    <div class="buttons">
+      <button id="btn-save-key">Test and save key</button>
+      <button id="btn-remove-key" class="secondary">Remove key</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>3 · Tune check</h2>
+    <p class="muted small">Asks Claude for Driving picks at Tempo 2 and Tempo 5, seeded with your top tracks, and checks each pick on Spotify. Uses your key: two requests.</p>
+    <div class="buttons"><button id="btn-tune">Run Tune check</button></div>
+    <div id="tune-results"></div>
+  </section>
+
+  <section class="card">
+    <h2>Log</h2>
+    <ul id="log"></ul>
+  </section>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
