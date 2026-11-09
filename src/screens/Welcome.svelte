@@ -33,7 +33,7 @@ async function login() {
   {#if needsClientId}
     <label class="label" for="client-id">Spotify client ID</label>
     <input id="client-id" class="field" bind:value={clientId} autocomplete="off" spellcheck="false" />
-    <p class="small muted">Redirect URI to register: <code>{spotify.redirectUri()}</code></p>
+    <p class="small muted hint">Redirect URI to register: <code>{spotify.redirectUri()}</code></p>
   {/if}
 
   <div class="cta">
@@ -55,4 +55,5 @@ async function login() {
   .cta { margin-top: 28px; }
   .center { text-align: center; margin-top: 12px; }
   code { word-break: break-all; }
+  .hint { margin: 8px 0 0; }
 </style>

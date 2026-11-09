@@ -1,4 +1,4 @@
-# Playlist Studio
+# Géza
 
 A small PWA that keeps four Spotify playlists (Driving, Working, Cooking, Home) fresh each week. Spotify stores the playlists, Claude picks the songs, and everything else stays on the device. There is no backend.
 

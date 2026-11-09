@@ -5,3 +5,6 @@ dev-dist/
 .env.*
 !.env.example
 *.local
+test-results/
+playwright-report/
+screenshots/

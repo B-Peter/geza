@@ -1,5 +1,5 @@
 {
-  "name": "playlist-studio",
+  "name": "geza",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,9 +7,12 @@
     "dev": "vite --host 127.0.0.1 --port 8080",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1 --port 8080",
-    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "check": "svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.e2e.json --noEmit",
     "test": "vitest run",
-    "lint": "biome check"
+    "lint": "biome check",
+    "e2e": "playwright test",
+    "e2e:update": "playwright test --update-snapshots",
+    "shots": "node scripts/shots.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.7.0",
@@ -18,8 +21,10 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6",
+    "@playwright/test": "1.65.0",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@tsconfig/svelte": "5.0.8",
+    "@types/node": "24.19.2",
     "svelte": "5.57.3",
     "svelte-check": "4.7.8",
     "typescript": "6.0.3",

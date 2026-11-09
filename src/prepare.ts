@@ -31,7 +31,7 @@ export async function ensurePlaylists(
     const playlist = await spotify.createPlaylist(
       profile.id,
       mix.playlistName,
-      `${mix.name} mix, refreshed weekly by Playlist Studio.`,
+      `${mix.name} mix, refreshed weekly by Géza.`,
     );
     out = out.map((m) => (m.id === mix.id ? { ...m, playlistId: playlist.id } : m));
     await save(out);

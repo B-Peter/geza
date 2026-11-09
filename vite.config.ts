@@ -41,8 +41,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       injectRegister: false,
       manifest: {
-        name: "Playlist Studio",
-        short_name: "Playlists",
+        name: "Géza",
+        short_name: "Géza",
         start_url: "./",
         scope: "./",
         display: "standalone",

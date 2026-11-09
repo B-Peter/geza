@@ -78,8 +78,8 @@ $("btn-playlist").addEventListener("click", (e) =>
     const me = await spotify.getProfile();
     const playlist = await spotify.createPlaylist(
       me.id,
-      "Playlist Studio test",
-      "Created by the Playlist Studio spike. Safe to delete.",
+      "Géza test",
+      "Created by the Géza diagnostics page. Safe to delete.",
     );
     log(`Created playlist "${playlist.name}".`, "ok");
 
