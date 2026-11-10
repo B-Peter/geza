@@ -1,10 +1,12 @@
 // App-wide state (Svelte 5 runes) and the hash router.
 
 import * as claude from "./claude.js";
+import { prefetchDeck } from "./deckCache.js";
 import { type LearnSummary, learnFromSpotify } from "./learn.js";
 import { loadMixes, loadPending, type Mix, type MixId, type PendingSwap, saveMixes } from "./mixes.js";
 import * as spotify from "./spotify.js";
 import { type Profile, SessionExpiredError } from "./spotify.js";
+import { loadTrain } from "./train.js";
 
 export type Route =
   | { name: "mixes" }
@@ -145,6 +147,10 @@ class AppState {
     }
     this.ready = true;
     void this.learn();
+    // A Train deck takes a while to build: start now, so it's ready when you get there.
+    if (this.loggedIn && this.hasKey && !this.needsPlaylists && navigator.onLine) {
+      void loadTrain().then((d) => prefetchDeck(d));
+    }
   }
 
   mix(id: MixId): Mix {

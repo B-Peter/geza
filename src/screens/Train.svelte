@@ -511,6 +511,10 @@ $effect(() => {
       <p class="small muted tally" data-testid="last-deck">
         Last deck: {lastDeck.found} of {lastDeck.asked} artists on Spotify · {lastDeck.size} songs · {lastDeck.yes} yes,
         {lastDeck.no} no
+        {#if lastDeck.ms}
+          · built in {(lastDeck.ms.total / 1000).toFixed(0)} s (Claude {(lastDeck.ms.claude / 1000).toFixed(0)} s, Spotify
+          {((lastDeck.ms.listening + lastDeck.ms.spotify) / 1000).toFixed(0)} s)
+        {/if}
       </p>
     {/if}
   {/if}

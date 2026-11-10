@@ -22,7 +22,7 @@ test("11 train card with song details", async ({ page }) => {
   // Everything known about the song is on the card.
   await expect(card.getByText(/Night Service · .*3:42/)).toBeVisible();
   await expect(card.getByText("indie rock")).toBeVisible();
-  await expect(card.getByText("90s")).toBeVisible();
+  await expect(card.getByText("1990s")).toBeVisible();
   await expect(card.getByText("driving")).toBeVisible();
   await expect(card.getByRole("img", { name: "Popularity 3 of 5" })).toBeVisible();
   await expect(card.getByText("Like your loved tracks")).toBeVisible();
@@ -70,7 +70,7 @@ test("flow: swipe yes and no; yes lands in Géza · Yes; taste is recorded", asy
   expect(history).toHaveLength(2);
   expect(history[0]).toMatchObject({
     verdict: "yes",
-    tags: ["indie rock", "90s", "driving"],
+    tags: ["indie rock", "driving", "1990s"],
     year: 1997,
     durationMs: 222_000,
     explicit: false,
@@ -112,7 +112,7 @@ test("train: MusicBrainz adds the original year, origin and genres", async ({ pa
     return (await store.get("train")).history[0];
   });
   expect(first).toMatchObject({ year: 1994, country: "GB" });
-  expect(first.tags).toEqual(expect.arrayContaining(["indie rock", "90s", "driving", "britpop"]));
+  expect(first.tags).toEqual(expect.arrayContaining(["indie rock", "driving", "1990s", "britpop"]));
 });
 
 test("train: with several devices you pick one, and Géza remembers it", async ({ page }) => {

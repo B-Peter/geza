@@ -252,9 +252,9 @@ Rules:
 - "want": "hit" for a new artist (their best-known song is the best
   introduction), "deep cut" for a familiar one, "any" when it doesn't
   matter.
-- "reason": 12 words or fewer, plain language, why this listener.
-- "tags": 2 to 4 short lowercase labels: main genre, era as a decade
-  (e.g. "90s"), mood (e.g. "driving", "mellow").
+- "reason": 8 words or fewer, plain language, why this listener.
+- "tags": 2 short lowercase labels: main genre and mood (e.g. "driving",
+  "mellow"). No era: the app adds it from the song.
 - Output JSON only, matching the schema.`;
 
 export interface ArtistPick {

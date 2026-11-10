@@ -7,7 +7,7 @@ import type { Enrichment } from "./musicbrainz.js";
 import type { Profile, Track } from "./spotify.js";
 import * as spotify from "./spotify.js";
 import * as store from "./store.js";
-import { buildTaste, type Judgement, type TasteProfile, type Verdict } from "./taste.js";
+import { buildTaste, decade, type Judgement, type TasteProfile, type Verdict } from "./taste.js";
 import { normalize, songKey } from "./text.js";
 
 export const DECK_SIZE = 15;
@@ -37,6 +37,18 @@ export interface DeckStat {
   found: number;
   /** Cards in the deck. */
   size: number;
+  /** How long each step took, in ms (missing for decks from before this was recorded). */
+  ms?: DeckTiming;
+}
+
+export interface DeckTiming {
+  /** Reading top tracks, artists and recent plays from Spotify. */
+  listening: number;
+  /** Claude naming the artists. */
+  claude: number;
+  /** Finding the artists and their songs on Spotify. */
+  spotify: number;
+  total: number;
 }
 
 export interface Deck {
@@ -44,6 +56,7 @@ export interface Deck {
   cards: Card[];
   asked: number;
   found: number;
+  ms: DeckTiming;
 }
 
 export interface TrainData {
@@ -122,7 +135,7 @@ export function deckFrom(
 /** Below this many cards the artist route is topped up with song picks. */
 export const MIN_DECK = 8;
 /** Artists Claude is asked for; some won't be on Spotify or will be all known. */
-const ARTISTS_ASKED = DECK_SIZE + 7;
+const ARTISTS_ASKED = DECK_SIZE + 5;
 
 export interface ArtistResolved {
   pick: ArtistPick;
@@ -171,7 +184,14 @@ export function deckFromArtists(resolved: ArtistResolved[], data: TrainData, kno
     if (!track) continue;
     seen.add(songKey(track.artist, track.title));
     if (knownArtist) familiar++;
-    cards.push({ track, reason: pick.reason, tags: (pick.tags ?? []).slice(0, 4) });
+    // Claude gives genre and mood; the era comes from the song itself.
+    const tags = [
+      ...new Set([
+        ...(pick.tags ?? []).map((s) => s.toLowerCase()),
+        ...(track.year ? [decade(track.year)] : []),
+      ]),
+    ];
+    cards.push({ track, reason: pick.reason, tags: tags.slice(0, 4) });
     if (cards.length >= DECK_SIZE) break;
   }
   return cards;
@@ -219,7 +239,17 @@ interface Listening {
   recentIds: string[];
 }
 
+let listeningCache: { at: number; value: Listening } | null = null;
+const LISTENING_TTL_MS = 10 * 60_000;
+
 async function readListening(): Promise<Listening> {
+  if (listeningCache && Date.now() - listeningCache.at < LISTENING_TTL_MS) return listeningCache.value;
+  const value = await fetchListening();
+  listeningCache = { at: Date.now(), value };
+  return value;
+}
+
+async function fetchListening(): Promise<Listening> {
   const [topTracks, topArtists, recent] = await Promise.all([
     spotify.getTopTracks(50),
     spotify.getTopArtists(30),
@@ -243,8 +273,10 @@ async function knownFrom(data: TrainData, l: Listening, candidateIds: string[]):
  * artists worked out.
  */
 export async function buildDeck(data: TrainData, onProgress: (m: string) => void = () => {}): Promise<Deck> {
+  const t0 = performance.now();
   onProgress("Reading your listening…");
   const listening = await readListening();
+  const t1 = performance.now();
   onProgress("Claude is picking artists to discover…");
   const judged = uniqueNames(
     [
@@ -266,6 +298,7 @@ export async function buildDeck(data: TrainData, onProgress: (m: string) => void
     },
     "low",
   );
+  const t2 = performance.now();
   onProgress("Finding their songs on Spotify…");
   const resolved = await resolveArtists(picks);
   const known = await knownFrom(
@@ -282,7 +315,14 @@ export async function buildDeck(data: TrainData, onProgress: (m: string) => void
     cards = [...cards, ...more].slice(0, DECK_SIZE);
   }
   if (cards.length === 0) throw new Error("None of Claude's picks were found on Spotify. Try again.");
-  return { at, cards: cards.map((c) => ({ ...c, deck: at })), asked: picks.length, found };
+  const t3 = performance.now();
+  const ms: DeckTiming = {
+    listening: Math.round(t1 - t0),
+    claude: Math.round(t2 - t1),
+    spotify: Math.round(t3 - t2),
+    total: Math.round(t3 - t0),
+  };
+  return { at, cards: cards.map((c) => ({ ...c, deck: at })), asked: picks.length, found, ms };
 }
 
 /** The older route: Claude names songs, Spotify search finds them. */
@@ -316,7 +356,13 @@ async function buildDeckByTitles(data: TrainData, l: Listening, known: Known, ha
 
 /** Remember how a deck went (kept for the last 50 decks). */
 export async function recordDeck(data: TrainData, deck: Deck): Promise<TrainData> {
-  const stat: DeckStat = { at: deck.at, asked: deck.asked, found: deck.found, size: deck.cards.length };
+  const stat: DeckStat = {
+    at: deck.at,
+    asked: deck.asked,
+    found: deck.found,
+    size: deck.cards.length,
+    ms: deck.ms,
+  };
   const next = { ...data, decks: [...(data.decks ?? []), stat].slice(-50) };
   await saveTrain(next);
   return next;
