@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { defaultMixes, type Mix } from "../src/mixes.js";
 import type { Track } from "../src/spotify.js";
-import { applySwap, balance, filterAdditions, matchRemovals, swapCounts } from "../src/swap.js";
+import {
+  addBlocked,
+  applySwap,
+  balance,
+  filterAdditions,
+  matchRemovals,
+  swapCounts,
+  unblock,
+} from "../src/swap.js";
 import { songKey } from "../src/text.js";
 
 const track = (n: number, artist = `Artist ${n}`, title = `Song ${n}`): Track => ({
@@ -115,5 +123,20 @@ describe("balance and applySwap", () => {
       [{ track: track(9), reason: "" }],
     );
     expect(result.map((t) => t.id)).toEqual(["id1", "id3", "id9"]);
+  });
+});
+
+describe("addBlocked and unblock", () => {
+  const ref = (n: number) => ({ artist: `Artist ${n}`, title: `Song ${n}` });
+  it("appends removed songs without duplicates", () => {
+    const out = addBlocked([ref(1)], [ref(2), { artist: "artist 1", title: "SONG 1 (Live)" }, ref(2)]);
+    expect(out).toEqual([ref(1), ref(2)]);
+  });
+  it("keeps only the newest entries past the cap", () => {
+    const out = addBlocked([ref(1), ref(2)], [ref(3), ref(4)], 3);
+    expect(out).toEqual([ref(2), ref(3), ref(4)]);
+  });
+  it("unblocks songs an undo brought back", () => {
+    expect(unblock([ref(1), ref(2), ref(3)], [ref(2)])).toEqual([ref(1), ref(3)]);
   });
 });

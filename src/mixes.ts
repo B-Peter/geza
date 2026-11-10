@@ -123,3 +123,9 @@ export async function pushSnapshot(mixId: MixId, tracks: Track[]): Promise<void>
 export async function loadSnapshots(mixId: MixId): Promise<Snapshot[]> {
   return (await store.get<Snapshot[]>(`snapshots:${mixId}`)) ?? [];
 }
+
+/** Remove the newest snapshot (after it has been restored). */
+export async function popSnapshot(mixId: MixId): Promise<void> {
+  const [, ...rest] = await loadSnapshots(mixId);
+  await store.set(`snapshots:${mixId}`, rest);
+}

@@ -10,7 +10,7 @@ const CSP = [
   "script-src 'self'",
   "style-src 'self'",
   "font-src 'self'",
-  "img-src 'self' data:",
+  "img-src 'self'",
   "connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://api.anthropic.com",
   "worker-src 'self'",
   "manifest-src 'self'",
@@ -61,7 +61,8 @@ export default defineConfig({
   ],
   build: {
     target: ["safari16", "chrome120", "firefox120"],
-    sourcemap: true,
+    // No source maps on the public site; dev builds still have them inline.
+    sourcemap: false,
     rollupOptions: {
       input: { main: "index.html", spike: "spike.html" },
     },

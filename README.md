@@ -38,6 +38,8 @@ npm run lint       # Biome
 npm run check      # svelte-check (types)
 npm test           # Vitest
 npm run build      # outputs dist/
+npm run e2e        # Playwright: every screen on a phone viewport (installed Edge), screenshot baselines,
+                   # plus a production-build smoke test under the strict CSP
 ```
 
 Locally, the app asks for the Spotify client ID on the welcome screen. To bake it in, put `VITE_SPOTIFY_CLIENT_ID=...` in `.env.local` (ignored by git).
@@ -55,4 +57,5 @@ On iPhone or iPad: open the Pages URL in Safari → Share → **Add to Home Scre
 
 - No backend, no third-party scripts, no analytics. A strict Content Security Policy limits network calls to Spotify and Anthropic.
 - Spotify tokens and the Claude key are encrypted with a non-extractable WebCrypto key in IndexedDB.
-- Dependencies are pinned and installed from the HTTPS npm registry; GitHub Actions are pinned to commit SHAs.
+- Dependencies are pinned, installed from the HTTPS npm registry with install scripts disabled (`ignore-scripts`); GitHub Actions are pinned to commit SHAs and the build job cannot deploy.
+- No source maps on the public site. CI runs a production-build smoke test that checks the CSP is present and actually blocks foreign origins.

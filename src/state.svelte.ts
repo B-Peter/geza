@@ -2,8 +2,8 @@
 
 import * as claude from "./claude.js";
 import { loadMixes, loadPending, type Mix, type MixId, type PendingSwap, saveMixes } from "./mixes.js";
-import type { Profile } from "./spotify.js";
 import * as spotify from "./spotify.js";
+import { type Profile, SessionExpiredError } from "./spotify.js";
 
 export type Route =
   | { name: "mixes" }
@@ -94,6 +94,12 @@ class AppState {
   }
 
   notify(message: unknown, kind: Toast["kind"] = "error"): void {
+    if (message instanceof SessionExpiredError) {
+      // Tokens are already deleted; show Welcome so the user can log in again.
+      this.loggedIn = false;
+      this.profile = null;
+      go("/");
+    }
     const text = message instanceof Error ? message.message : String(message);
     this.toast = { text, kind };
     const current = this.toast;

@@ -24,7 +24,7 @@ async function apply() {
     applyPending($state.snapshot(mix) as typeof mix, $state.snapshot(swap) as typeof swap),
   );
   if (!updated) return;
-  await app.updateMix(id, { lastAppliedAt: updated.lastAppliedAt });
+  await app.updateMix(id, { lastAppliedAt: updated.lastAppliedAt, blocked: updated.blocked });
   delete app.pending[id];
   app.notify(`${mix.name} updated in Spotify.`, "ok");
   go(`/mix/${id}`);

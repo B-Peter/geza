@@ -132,6 +132,23 @@ async function saveTokens(json: TokenResponse, previousRefresh?: string): Promis
   } satisfies Tokens);
 }
 
+class TokenError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Thrown when the Spotify login can't be refreshed any more; the app logs out. */
+export class SessionExpiredError extends Error {
+  constructor() {
+    super("Your Spotify login expired. Please log in again.");
+  }
+}
+
 async function tokenRequest(body: Record<string, string>): Promise<TokenResponse> {
   const res = await fetch(TOKEN_URL, {
     method: "POST",
@@ -143,7 +160,11 @@ async function tokenRequest(body: Record<string, string>): Promise<TokenResponse
     error_description?: string;
   };
   if (!res.ok || !json.access_token || !json.expires_in) {
-    throw new Error(`Spotify login error ${res.status}: ${json.error_description ?? json.error ?? ""}`);
+    throw new TokenError(
+      res.status,
+      json.error ?? "unknown",
+      `Spotify login error ${res.status}: ${json.error_description ?? json.error ?? ""}`,
+    );
   }
   return json as TokenResponse;
 }
@@ -202,17 +223,39 @@ export async function logout(): Promise<void> {
   await deleteSecret(TOKEN_SECRET);
 }
 
-async function accessToken(): Promise<string> {
-  const tokens = await getSecret<Tokens>(TOKEN_SECRET);
-  if (!tokens) throw new Error("Not logged in to Spotify.");
-  if (Date.now() < tokens.expires_at - 60_000) return tokens.access_token;
-  const json = await tokenRequest({
-    grant_type: "refresh_token",
-    refresh_token: tokens.refresh_token,
-    client_id: getClientId(),
-  });
+let refreshing: Promise<string> | null = null;
+
+async function refreshAccessToken(tokens: Tokens): Promise<string> {
+  let json: TokenResponse;
+  try {
+    json = await tokenRequest({
+      grant_type: "refresh_token",
+      refresh_token: tokens.refresh_token,
+      client_id: getClientId(),
+    });
+  } catch (e) {
+    // Refresh token expired or revoked (spotify.com/account/apps): the stored
+    // login is dead, so drop it and send the user back to Welcome.
+    if (e instanceof TokenError && e.code === "invalid_grant") {
+      await logout();
+      throw new SessionExpiredError();
+    }
+    throw e;
+  }
   await saveTokens(json, tokens.refresh_token);
   return json.access_token;
+}
+
+async function accessToken(force = false): Promise<string> {
+  const tokens = await getSecret<Tokens>(TOKEN_SECRET);
+  if (!tokens) throw new Error("Not logged in to Spotify.");
+  if (!force && Date.now() < tokens.expires_at - 60_000) return tokens.access_token;
+  // Single-flight: parallel requests near expiry share one refresh. Spotify
+  // rotates refresh tokens, so two refreshes in flight would revoke one.
+  refreshing ??= refreshAccessToken(tokens).finally(() => {
+    refreshing = null;
+  });
+  return refreshing;
 }
 
 export class SpotifyError extends Error {
@@ -231,21 +274,55 @@ interface ApiOptions {
   query?: Record<string, string | number>;
 }
 
-export async function api<T>(path: string, { method = "GET", body, query }: ApiOptions = {}): Promise<T> {
+function request(
+  path: string,
+  { method = "GET", body, query }: ApiOptions,
+  token: string,
+): Promise<Response> {
   const url = new URL(API + path);
   if (query) for (const [k, v] of Object.entries(query)) url.searchParams.set(k, String(v));
-  const res = await fetch(url, {
+  return fetch(url, {
     method,
     headers: {
-      Authorization: `Bearer ${await accessToken()}`,
+      Authorization: `Bearer ${token}`,
       ...(body ? { "Content-Type": "application/json" } : {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 204) return null as T;
-  const json = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-  if (!res.ok) throw new SpotifyError(res.status, path, json?.error?.message ?? res.statusText);
-  return json as T;
+}
+
+/** Longest Retry-After we wait out in place; beyond that the user is told. */
+const MAX_RETRY_AFTER_S = 30;
+
+export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
+  let token = await accessToken();
+  let retried401 = false;
+  let retried429 = false;
+  for (;;) {
+    const res = await request(path, options, token);
+    if (res.status === 401 && !retried401) {
+      // Token rejected before its expiry. Another request may have refreshed
+      // meanwhile; use that, else force one refresh. Never more than once.
+      retried401 = true;
+      const latest = await accessToken();
+      token = latest !== token ? latest : await accessToken(true);
+      continue;
+    }
+    if (res.status === 429 && !retried429) {
+      retried429 = true;
+      const wait = Number(res.headers.get("Retry-After") ?? "1");
+      if (Number.isFinite(wait) && wait <= MAX_RETRY_AFTER_S) {
+        await new Promise((r) => setTimeout(r, wait * 1000));
+        continue;
+      }
+      const when = Number.isFinite(wait) ? `in ${Math.ceil(wait / 60)} min` : "later";
+      throw new SpotifyError(429, path, `rate limited, try again ${when}`);
+    }
+    if (res.status === 204) return null as T;
+    const json = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+    if (!res.ok) throw new SpotifyError(res.status, path, json?.error?.message ?? res.statusText);
+    return json as T;
+  }
 }
 
 const toTrack = (t: SpotifyTrack): Track => ({

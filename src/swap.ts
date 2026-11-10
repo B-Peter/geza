@@ -92,6 +92,30 @@ export function balance(
   return remove.slice(0, allowed);
 }
 
+type SongRef = { artist: string; title: string };
+
+/** Cap on the never-again list: keeps the prompt small and bounded. */
+export const BLOCKED_MAX = 200;
+
+/** Add removed songs to the never-again list, newest last, without duplicates. */
+export function addBlocked(blocked: SongRef[], removed: SongRef[], max = BLOCKED_MAX): SongRef[] {
+  const keys = new Set(blocked.map(keyOf));
+  const out = [...blocked];
+  for (const r of removed) {
+    const key = keyOf(r);
+    if (keys.has(key)) continue;
+    keys.add(key);
+    out.push({ artist: r.artist, title: r.title });
+  }
+  return out.slice(-max);
+}
+
+/** Take songs off the never-again list (an undo brought them back). */
+export function unblock(blocked: SongRef[], restored: SongRef[]): SongRef[] {
+  const keys = new Set(restored.map(keyOf));
+  return blocked.filter((b) => !keys.has(keyOf(b)));
+}
+
 /** The playlist after the swap: kept songs in their order, new ones appended. */
 export function applySwap(current: Track[], remove: SwapEntry[], add: SwapEntry[]): Track[] {
   const out = new Set(remove.map((r) => r.track.id));

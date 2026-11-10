@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm run lint
       - run: npm run check
       - run: npm test
@@ -35,6 +35,14 @@ jobs:
         env:
           # Public by design (PKCE, no client secret). Set it under
           # Settings → Secrets and variables → Actions → Variables.
+          VITE_SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
+      # Production-build smoke test: pages load under the strict CSP with no
+      # console errors, and the CSP really blocks foreign connections.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e:prod
+        env:
+          PW_CHANNEL: chromium
+          # The smoke test rebuilds dist, which is what gets deployed below.
           VITE_SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

@@ -60,10 +60,15 @@ async function prepare() {
 }
 
 async function undo() {
-  const done = await app.task("Restoring the previous version…", () =>
+  const ok = confirm(
+    "Restore the playlist to how it was before the last swap? Changes made in Spotify since then will be lost.",
+  );
+  if (!ok) return;
+  const updated = await app.task("Restoring the previous version…", () =>
     undoLastSwap($state.snapshot(mix) as typeof mix),
   );
-  if (done) {
+  if (updated) {
+    await app.updateMix(id, { blocked: updated.blocked });
     app.notify("Restored the playlist from before the last swap.", "ok");
     await load();
   }

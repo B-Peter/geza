@@ -6,16 +6,25 @@ import {
   loadSnapshots,
   type Mix,
   type PendingSwap,
+  popSnapshot,
   pushSnapshot,
   savePending,
 } from "./mixes.js";
 import type { Profile, Track } from "./spotify.js";
 import * as spotify from "./spotify.js";
-import { applySwap, balance, filterAdditions, matchRemovals, type Resolved, swapCounts } from "./swap.js";
+import {
+  addBlocked,
+  applySwap,
+  balance,
+  filterAdditions,
+  matchRemovals,
+  type Resolved,
+  swapCounts,
+  unblock,
+} from "./swap.js";
 
 const ref = (t: { artist: string; title: string }) => ({ artist: t.artist, title: t.title });
 
-/** Create a private Spotify playlist for each mix that doesn't have one yet. */
 /**
  * Create a private Spotify playlist for each mix that doesn't have one yet.
  * Saves after each one, so a failure halfway doesn't orphan playlists.
@@ -94,7 +103,6 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
   onProgress("Claude is picking songs…");
   const picks = await curate(input);
   const removals = matchRemovals(picks.remove, current, mix.locked, counts.remove);
-  // Ask for a few spare picks' worth of headroom only via the retry below.
   onProgress("Finding the songs on Spotify…");
   let resolved = await resolveAll(picks.add);
   let { add, missing } = filterAdditions(resolved, current, removals, mix.blocked, counts.add);
@@ -149,17 +157,31 @@ export async function applyPending(mix: Mix, swap: PendingSwap): Promise<Mix> {
     applySwap(current, swap.remove, swap.add).map((t) => t.uri),
   );
   await clearPending(mix.id);
-  return { ...mix, lastAppliedAt: Date.now() };
+  return {
+    ...mix,
+    lastAppliedAt: Date.now(),
+    // Removed songs are never suggested again.
+    blocked: addBlocked(
+      mix.blocked,
+      swap.remove.map((r) => r.track),
+    ),
+  };
 }
 
-/** Put the playlist back the way it was before the last swap. */
-export async function undoLastSwap(mix: Mix): Promise<boolean> {
-  if (!mix.playlistId) return false;
+/**
+ * Put the playlist back the way it was before the last swap. Returns the
+ * updated mix, or null when there is nothing to undo.
+ */
+export async function undoLastSwap(mix: Mix): Promise<Mix | null> {
+  if (!mix.playlistId) return null;
   const [last] = await loadSnapshots(mix.id);
-  if (!last) return false;
+  if (!last) return null;
   await spotify.replacePlaylistTracks(
     mix.playlistId,
     last.tracks.map((t) => t.uri),
   );
-  return true;
+  // Only forget the snapshot once Spotify has the old list back.
+  await popSnapshot(mix.id);
+  // Songs that came back must not stay on the never-again list.
+  return { ...mix, blocked: unblock(mix.blocked, last.tracks) };
 }
