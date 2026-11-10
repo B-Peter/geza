@@ -226,7 +226,8 @@ test("train: a no goes to “Géza · No” in Spotify, and a fresh device reads
   ];
   await seed(page, ready);
   await page.evaluate(async () => {
-    const store = await import(/* @vite-ignore */ "/src/store.ts");
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const store = await load("/src/store.ts");
     await store.remove("train");
   });
   await open(page, "./#/train");
