@@ -98,3 +98,22 @@ describe("spotify api()", () => {
     expect(calls.filter((c) => c.auth === "Bearer new")).toHaveLength(3);
   });
 });
+
+describe("missingScopes", () => {
+  it("lists permissions the stored login doesn't have", async () => {
+    const { missingScopes, REQUIRED_SCOPES } = await import("../src/spotify.js");
+    secrets.set("spotifyTokens", { ...stored(3_600_000), scope: "user-read-private user-top-read" });
+    const missing = await missingScopes();
+    expect(missing).toContain("user-library-read");
+    expect(missing).not.toContain("user-top-read");
+    expect(missing).not.toContain("user-read-private");
+    secrets.set("spotifyTokens", { ...stored(3_600_000), scope: REQUIRED_SCOPES.join(" ") });
+    expect(await missingScopes()).toEqual([]);
+  });
+
+  it("treats a login without recorded permissions as missing all of them", async () => {
+    const { missingScopes, REQUIRED_SCOPES } = await import("../src/spotify.js");
+    secrets.set("spotifyTokens", stored(3_600_000));
+    expect(await missingScopes()).toEqual(REQUIRED_SCOPES);
+  });
+});

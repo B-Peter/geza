@@ -89,6 +89,11 @@ Rules:
 - Wildcards must still match the Tune tempo and energy.
 - At most 25% of picks released in the last 3 years.
 - If the owner's note conflicts with the history, follow the note.
+- Choose removals from "remove_first" and "never_played" first. Never
+  remove anything in "liked", and keep "played_often" songs unless the
+  remove count can't be met otherwise.
+- Treat "liked" and "played_often" as the strongest taste signals when
+  picking new songs.
 - If candidates are too few after filtering, return fewer picks, not
   worse ones.
 - Give each pick a reason of 12 words or fewer, plain language.
@@ -135,6 +140,11 @@ export interface CurateInput {
   current: SongRef[];
   top_artists: string[];
   note: string;
+  /** From your listening (see ledger.ts); empty until Géza has learned. */
+  liked?: SongRef[];
+  played_often?: (SongRef & { plays: number })[];
+  never_played?: SongRef[];
+  remove_first?: SongRef[];
 }
 
 const PICK_SCHEMA = {

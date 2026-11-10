@@ -1,6 +1,7 @@
 // The core loop: Claude picks → Spotify search → pending swap → apply.
 
 import { type CurateInput, curate, type Pick } from "./claude.js";
+import { loadLedger, setKnown, signals } from "./ledger.js";
 import {
   clearPending,
   loadSnapshots,
@@ -43,6 +44,8 @@ export async function ensurePlaylists(
       `${mix.name} mix, refreshed weekly by Géza.`,
     );
     out = out.map((m) => (m.id === mix.id ? { ...m, playlistId: playlist.id } : m));
+    // Start the ledger empty, so songs you add in Spotify later are noticed.
+    await setKnown(mix.id, []);
     await save(out);
   }
 }
@@ -99,6 +102,7 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
     current: current.map(ref),
     top_artists: topArtists,
     note: mix.note,
+    ...signals(await loadLedger(mix.id), current, Date.now()),
   };
 
   onProgress("Claude is picking songs…");
@@ -153,10 +157,13 @@ export async function applyPending(mix: Mix, swap: PendingSwap): Promise<Mix> {
   if (!mix.playlistId) throw new Error("This mix has no playlist yet.");
   const current = await spotify.getPlaylistTracks(mix.playlistId);
   await pushSnapshot(mix.id, current);
+  const next = applySwap(current, swap.remove, swap.add);
   await spotify.replacePlaylistTracks(
     mix.playlistId,
-    applySwap(current, swap.remove, swap.add).map((t) => t.uri),
+    next.map((t) => t.uri),
   );
+  // Géza's own change: record it so it isn't read as yours next sync.
+  await setKnown(mix.id, next);
   await clearPending(mix.id);
   return {
     ...mix,
@@ -183,6 +190,7 @@ export async function undoLastSwap(mix: Mix): Promise<Mix | null> {
   );
   // Only forget the snapshot once Spotify has the old list back.
   await popSnapshot(mix.id);
+  await setKnown(mix.id, last.tracks);
   // Songs that came back must not stay on the never-again list.
   return { ...mix, blocked: unblock(mix.blocked, last.tracks) };
 }

@@ -12,12 +12,16 @@ export const MARKET = "HU";
 // Only what the app uses today. Milestone 4 (listening history) will add
 // user-library-read and user-read-recently-played; the car release will add
 // the playback scopes. Each addition means logging in again.
-const SCOPES = [
+/** Only what the app uses. Adding one means logging in to Spotify again. */
+export const REQUIRED_SCOPES = [
   "user-read-private", // /me: country and Premium status
   "user-top-read", // top tracks and artists as taste signals
   "playlist-read-private", // read the mix playlists (they are private)
   "playlist-modify-private", // create and update them
-].join(" ");
+  "user-library-read", // which songs in the mixes you've hearted
+  "user-read-recently-played", // which songs in the mixes you've played
+];
+const SCOPES = REQUIRED_SCOPES.join(" ");
 
 const CLIENT_ID_KEY = "ps.spotifyClientId";
 const PKCE_KEY = "ps.pkce";
@@ -36,12 +40,15 @@ interface Tokens {
   access_token: string;
   refresh_token: string;
   expires_at: number;
+  /** Permissions Spotify granted; missing in logins from before it was recorded. */
+  scope?: string;
 }
 
 interface TokenResponse {
   access_token: string;
   refresh_token?: string;
   expires_in: number;
+  scope?: string;
 }
 
 interface SpotifyTrack {
@@ -122,13 +129,14 @@ export async function startLogin(): Promise<void> {
   location.assign(`${AUTH_URL}?${params}`);
 }
 
-async function saveTokens(json: TokenResponse, previousRefresh?: string): Promise<void> {
-  const refresh = json.refresh_token ?? previousRefresh;
+async function saveTokens(json: TokenResponse, previous?: Tokens): Promise<void> {
+  const refresh = json.refresh_token ?? previous?.refresh_token;
   if (!refresh) throw new Error("Spotify didn't return a refresh token.");
   await setSecret(TOKEN_SECRET, {
     access_token: json.access_token,
     refresh_token: refresh,
     expires_at: Date.now() + json.expires_in * 1000,
+    scope: json.scope ?? previous?.scope,
   } satisfies Tokens);
 }
 
@@ -219,6 +227,14 @@ export async function isLoggedIn(): Promise<boolean> {
   return Boolean(await getSecret<Tokens>(TOKEN_SECRET));
 }
 
+/** Permissions the app needs but the current login doesn't have. */
+export async function missingScopes(): Promise<string[]> {
+  const tokens = await getSecret<Tokens>(TOKEN_SECRET);
+  if (!tokens) return [];
+  const granted = new Set((tokens.scope ?? "").split(/\s+/).filter(Boolean));
+  return REQUIRED_SCOPES.filter((s) => !granted.has(s));
+}
+
 export async function logout(): Promise<void> {
   await deleteSecret(TOKEN_SECRET);
 }
@@ -242,7 +258,7 @@ async function refreshAccessToken(tokens: Tokens): Promise<string> {
     }
     throw e;
   }
-  await saveTokens(json, tokens.refresh_token);
+  await saveTokens(json, tokens);
   return json.access_token;
 }
 
@@ -438,3 +454,38 @@ export async function findTrack(artist: string, title: string): Promise<Track | 
 
 /** Link that opens the playlist in the Spotify app. */
 export const openUri = (playlistId: string) => `spotify:playlist:${playlistId}`;
+
+export interface RecentPlay {
+  trackId: string;
+  playedAt: number;
+}
+
+/**
+ * Plays after `afterMs` (Spotify lists only plays of ~30 s or more, and only
+ * the last 50). `complete` is false when there were more plays than Spotify
+ * returns, i.e. some were missed because the app wasn't opened for a while.
+ */
+export async function getRecentlyPlayed(
+  afterMs: number | null,
+): Promise<{ plays: RecentPlay[]; complete: boolean }> {
+  const json = await api<{ items: { track: SpotifyTrack | null; played_at: string }[] }>(
+    "/me/player/recently-played",
+    { query: { limit: 50, ...(afterMs ? { after: afterMs } : {}) } },
+  );
+  const plays = json.items
+    .filter((i) => i.track?.id)
+    .map((i) => ({ trackId: (i.track as SpotifyTrack).id, playedAt: Date.parse(i.played_at) }));
+  return { plays, complete: afterMs === null || json.items.length < 50 };
+}
+
+/** Which of these track IDs are in your Liked Songs. */
+export async function likedAmong(ids: string[]): Promise<Set<string>> {
+  const liked = new Set<string>();
+  for (const part of chunk([...new Set(ids)], 40)) {
+    const flags = await api<boolean[]>("/me/tracks/contains", { query: { ids: part.join(",") } });
+    part.forEach((id, i) => {
+      if (flags[i]) liked.add(id);
+    });
+  }
+  return liked;
+}
