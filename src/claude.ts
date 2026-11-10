@@ -182,15 +182,25 @@ const PICKS_SCHEMA = {
 };
 
 /**
- * How hard Claude thinks before answering. "low" is noticeably faster and
- * fine for swipe decks and random picks; weekly mix swaps use "medium".
+ * How much Claude puts into an answer. "low" is for swipe decks and random
+ * picks, where the wait matters most; weekly mix swaps use "medium".
  */
 export type Effort = "low" | "medium";
 
+/**
+ * This model thinks before it writes unless told not to, and nothing arrives
+ * while it does. A deck waits for its first artist, so "low" answers skip the
+ * thinking and start writing at once; a mix swap has more rules to weigh and
+ * keeps it.
+ */
+export const thinkingFor = (effort: Effort) =>
+  effort === "low" ? ({ type: "disabled" } as const) : ({ type: "adaptive" } as const);
+
 /** The request every call sends: JSON in, JSON matching the schema out. */
-const request = (system: string, input: unknown, schema: Record<string, unknown>, effort: Effort) => ({
+export const request = (system: string, input: unknown, schema: Record<string, unknown>, effort: Effort) => ({
   model: MODEL,
   max_tokens: 16000,
+  thinking: thinkingFor(effort),
   output_config: {
     effort,
     format: { type: "json_schema" as const, schema },

@@ -137,7 +137,8 @@ test("train: with several devices you pick one, and Géza remembers it", async (
   await expect(picker.getByRole("button", { name: /Living room TV/ })).toBeDisabled();
   await picker.getByRole("button", { name: /MacBook/ }).click();
   await expect(page.getByText(/Playing on MacBook · started in \d\.\d s/)).toBeVisible();
-  expect(player.transfers).toEqual(["mac1"]);
+  // Already the active device: no wake-up transfer, it plays straight away.
+  expect(player.transfers).toEqual([]);
   expect(player.plays[0]?.device).toBe("mac1");
   // Next time it goes straight to the MacBook.
   await open(page, "./#/train");

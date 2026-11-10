@@ -325,6 +325,10 @@ function request(
 /** Longest Retry-After we wait out in place; beyond that the user is told. */
 const MAX_RETRY_AFTER_S = 30;
 
+let waitedMs = 0;
+/** All the time spent waiting out Spotify's rate limit so far (for timings). */
+export const rateLimitWaitMs = (): number => waitedMs;
+
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   let token = await accessToken();
   let retried401 = false;
@@ -343,6 +347,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
       retried429 = true;
       const wait = Number(res.headers.get("Retry-After") ?? "1");
       if (Number.isFinite(wait) && wait <= MAX_RETRY_AFTER_S) {
+        waitedMs += wait * 1000;
         await new Promise((r) => setTimeout(r, wait * 1000));
         continue;
       }

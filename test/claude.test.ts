@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanKey, ObjectScanner, testAndSaveKey } from "../src/claude.js";
+import { cleanKey, ObjectScanner, request, testAndSaveKey } from "../src/claude.js";
 
 describe("cleanKey", () => {
   it("removes invisible characters, spaces and quotes a paste can add", () => {
@@ -35,5 +35,12 @@ describe("ObjectScanner", () => {
       ...scanner.push(`${item.slice(20)}]}`),
     ];
     expect(found).toEqual([item]);
+  });
+});
+
+describe("request", () => {
+  it("skips thinking where the wait matters (decks, random), keeps it for mix swaps", () => {
+    expect(request("s", {}, {}, "low").thinking).toEqual({ type: "disabled" });
+    expect(request("s", {}, {}, "medium").thinking).toEqual({ type: "adaptive" });
   });
 });

@@ -133,24 +133,24 @@ class AppState {
     this.loggedIn = await spotify.isLoggedIn();
     this.hasKey = await claude.hasKey();
     this.mixes = await loadMixes();
-    for (const id of MIX_IDS) {
-      const swap = await loadPending(id);
-      if (swap) this.pending[id] = swap;
-    }
-    if (this.loggedIn) {
-      this.needsReconnect = (await spotify.missingScopes()).length > 0;
-      try {
-        this.profile = await spotify.getProfile();
-      } catch (e) {
-        this.notify(e);
-      }
-    }
-    this.ready = true;
-    void this.learn();
-    // A Train deck takes a while to build: start now, so it's ready when you get there.
+    // A Train deck takes a while to build: start first, so it's ready when you get there.
     if (this.loggedIn && this.hasKey && !this.needsPlaylists && navigator.onLine) {
       void loadTrain().then((d) => prefetchDeck(d));
     }
+    const swaps = await Promise.all(MIX_IDS.map((id) => loadPending(id)));
+    for (const swap of swaps) if (swap) this.pending[swap.mixId] = swap;
+    if (this.loggedIn) {
+      this.needsReconnect = (await spotify.missingScopes()).length > 0;
+      // Nothing on the first screen needs the profile: the app doesn't wait for it.
+      void spotify
+        .getProfile()
+        .then((p) => {
+          this.profile = p;
+        })
+        .catch((e) => this.notify(e));
+    }
+    this.ready = true;
+    void this.learn();
   }
 
   mix(id: MixId): Mix {

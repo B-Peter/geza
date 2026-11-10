@@ -246,6 +246,8 @@ async function playFrom(i: number) {
 /** Wake the chosen Spotify app, then play from card i. */
 async function wakeAndPlay(i: number) {
   if (!device) return;
+  // Already the active device: nothing to wake, play straight away.
+  if (device.is_active) return playFrom(i);
   const token = playToken;
   await spotify.transferTo(device.id).catch(() => {});
   await new Promise((r) => setTimeout(r, 300));
@@ -615,8 +617,10 @@ $effect(() => {
         Last deck: {lastDeck.found} of {lastDeck.asked} artists on Spotify · {lastDeck.size} songs · {lastDeck.yes} yes,
         {lastDeck.no} no
         {#if lastDeck.ms}
-          · built in {(lastDeck.ms.total / 1000).toFixed(0)} s (Claude {(lastDeck.ms.claude / 1000).toFixed(0)} s, Spotify
-          {((lastDeck.ms.listening + lastDeck.ms.spotify) / 1000).toFixed(0)} s)
+          · first cards in {(lastDeck.ms.total / 1000).toFixed(1)} s (Claude {(lastDeck.ms.claude / 1000).toFixed(1)} s,
+          Spotify {((lastDeck.ms.listening + lastDeck.ms.spotify) / 1000).toFixed(1)} s{lastDeck.ms.waited
+            ? `, of which ${(lastDeck.ms.waited / 1000).toFixed(0)} s waiting for Spotify's rate limit`
+            : ""})
         {/if}
       </p>
     {/if}

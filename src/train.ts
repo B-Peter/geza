@@ -50,6 +50,8 @@ export interface DeckTiming {
   /** Finding the artists and their songs on Spotify. */
   spotify: number;
   total: number;
+  /** Of all that, time Spotify made us wait because of its rate limit. */
+  waited?: number;
 }
 
 export interface Deck {
@@ -336,6 +338,7 @@ export async function buildDeck(
   avoid: Card[] = [],
 ): Promise<Deck> {
   const t0 = performance.now();
+  const waited0 = spotify.rateLimitWaitMs();
   onProgress("Reading your listening…");
   const listening = await readListening();
   const t1 = performance.now();
@@ -410,6 +413,7 @@ export async function buildDeck(
     claude: Math.round((t2 || t3) - t1),
     spotify: Math.round(t3 - (t2 || t3)),
     total: Math.round(t3 - t0),
+    waited: Math.round(spotify.rateLimitWaitMs() - waited0),
   };
   const deck: Deck = { at, cards: first, asked: stats.asked, found: stats.found, ms };
   const finish = async (): Promise<Card[]> => {
