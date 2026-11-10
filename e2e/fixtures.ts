@@ -37,6 +37,7 @@ export const CLAUDE_PICKS = {
 };
 
 const CORS = { "access-control-allow-origin": "*" };
+const PLAYS_BASE = Date.now();
 
 /** Mock every external API the app talks to. */
 export async function mockApis(page: Page): Promise<void> {
@@ -62,6 +63,23 @@ export async function mockApis(page: Page): Promise<void> {
       if (route.request().method() === "GET")
         return json({ items: PLAYLIST_TRACKS.map((t) => ({ item: t })), next: null });
       return json({ snapshot_id: "s1" });
+    }
+    if (path === "/me/player/recently-played") {
+      // Two plays of Midnight Tarmac and one of Harbour Lights, in the last hour.
+      // Fixed timestamps, like real Spotify: the same play keeps its time.
+      const ago = (min: number) => new Date(PLAYS_BASE - min * 60_000).toISOString();
+      return json({
+        items: [
+          { track: PLAYLIST_TRACKS[0], played_at: ago(10) },
+          { track: PLAYLIST_TRACKS[0], played_at: ago(30) },
+          { track: PLAYLIST_TRACKS[2], played_at: ago(50) },
+        ],
+      });
+    }
+    if (path === "/me/tracks/contains") {
+      // Midnight Tarmac is in your Liked Songs.
+      const ids = (url.searchParams.get("ids") ?? "").split(",");
+      return json(ids.map((id) => id === "t1"));
     }
     if (path === "/search") {
       const q = (url.searchParams.get("q") ?? "").toLowerCase();
@@ -107,54 +125,63 @@ export interface SeedOptions {
   claudeKey?: boolean;
   playlists?: boolean;
   pendingSwap?: boolean;
+  /** A login from before Géza asked for the listening permissions. */
+  oldLogin?: boolean;
 }
+
+export const ALL_SCOPES =
+  "user-read-private user-top-read playlist-read-private playlist-modify-private user-library-read user-read-recently-played";
 
 /** Put the app into a state by writing straight to its storage (dev server only). */
 export async function seed(page: Page, opts: SeedOptions): Promise<void> {
   await page.goto("./");
-  await page.evaluate(async (o) => {
-    // Runs in the browser against the Vite dev server, which serves the
-    // app's own modules; this writes state exactly as the app would.
-    const load = (path: string) => import(/* @vite-ignore */ path);
-    const store = await load("/src/store.ts");
-    const mixes = await load("/src/mixes.ts");
-    localStorage.setItem("ps.spotifyClientId", "test-client-id");
-    if (o.loggedIn) {
-      await store.setSecret("spotifyTokens", {
-        access_token: "test-access",
-        refresh_token: "test-refresh",
-        expires_at: Date.now() + 3_600_000,
-      });
-    }
-    if (o.claudeKey) await store.setSecret("anthropicKey", "sk-ant-test-0000000000004f2a");
-    const list = mixes
-      .defaultMixes()
-      .map((m: { id: string }) => ({ ...m, playlistId: o.playlists ? `pl-${m.id}` : null }));
-    await mixes.saveMixes(list);
-    if (o.pendingSwap) {
-      const t = (id: string, artist: string, title: string) => ({
-        id,
-        uri: `spotify:track:${id}`,
-        artist,
-        title,
-      });
-      await mixes.savePending({
-        mixId: "driving",
-        createdAt: Date.now(),
-        remove: [
-          { track: t("t5", "Sundial", "Blue Hour"), reason: "Too slow for this mix" },
-          { track: t("t6", "Gravel Choir", "Hymn for the Ring Road"), reason: "Never played" },
-        ],
-        add: [
-          { track: t("t101", "Fifth Gear", "Long Way Round"), reason: "Like your loved tracks" },
-          { track: t("t102", "Paper Coast", "Open Window"), reason: "Same scene, new to you" },
-        ],
-        picked: 3,
-        found: 2,
-        missing: [{ artist: "Ghost Band", title: "Not Real", reason: "" }],
-      });
-    }
-  }, opts);
+  await page.evaluate(
+    async (o) => {
+      // Runs in the browser against the Vite dev server, which serves the
+      // app's own modules; this writes state exactly as the app would.
+      const load = (path: string) => import(/* @vite-ignore */ path);
+      const store = await load("/src/store.ts");
+      const mixes = await load("/src/mixes.ts");
+      localStorage.setItem("ps.spotifyClientId", "test-client-id");
+      if (o.loggedIn) {
+        await store.setSecret("spotifyTokens", {
+          access_token: "test-access",
+          refresh_token: "test-refresh",
+          expires_at: Date.now() + 3_600_000,
+          ...(o.oldLogin ? {} : { scope: o.allScopes }),
+        });
+      }
+      if (o.claudeKey) await store.setSecret("anthropicKey", "sk-ant-test-0000000000004f2a");
+      const list = mixes
+        .defaultMixes()
+        .map((m: { id: string }) => ({ ...m, playlistId: o.playlists ? `pl-${m.id}` : null }));
+      await mixes.saveMixes(list);
+      if (o.pendingSwap) {
+        const t = (id: string, artist: string, title: string) => ({
+          id,
+          uri: `spotify:track:${id}`,
+          artist,
+          title,
+        });
+        await mixes.savePending({
+          mixId: "driving",
+          createdAt: Date.now(),
+          remove: [
+            { track: t("t5", "Sundial", "Blue Hour"), reason: "Too slow for this mix" },
+            { track: t("t6", "Gravel Choir", "Hymn for the Ring Road"), reason: "Never played" },
+          ],
+          add: [
+            { track: t("t101", "Fifth Gear", "Long Way Round"), reason: "Like your loved tracks" },
+            { track: t("t102", "Paper Coast", "Open Window"), reason: "Same scene, new to you" },
+          ],
+          picked: 3,
+          found: 2,
+          missing: [{ artist: "Ghost Band", title: "Not Real", reason: "" }],
+        });
+      }
+    },
+    { ...opts, allScopes: ALL_SCOPES },
+  );
 }
 
 /** Open a route with a full reload, so the app starts from the seeded storage. */

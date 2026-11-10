@@ -29,6 +29,8 @@ test("04 mixes", async ({ page }) => {
   await seed(page, { loggedIn: true, claudeKey: true, playlists: true });
   await open(page, "./#/");
   await expect(page.getByRole("heading", { name: "Mixes", exact: true })).toBeVisible();
+  // Wait for the sync with Spotify listening, so the screenshot is stable.
+  await expect(page.getByText(/Learned from your listening/)).toBeVisible();
   await snap(page, "04-mixes");
 });
 
@@ -36,6 +38,7 @@ test("05 one mix", async ({ page }) => {
   await seed(page, { loggedIn: true, claudeKey: true, playlists: true });
   await open(page, "./#/mix/driving");
   await expect(page.getByText("Midnight Tarmac")).toBeVisible();
+  await expect(page.getByText("· Liked · played 2×")).toBeVisible();
   await snap(page, "05-mix");
 });
 
@@ -107,7 +110,14 @@ test("security: the Spotify login asks only for the scopes the app uses", async 
   await page.getByRole("button", { name: "Continue with Spotify" }).click();
   const url = new URL((await auth).url());
   expect(url.searchParams.get("scope")?.split(" ").sort()).toEqual(
-    ["playlist-modify-private", "playlist-read-private", "user-read-private", "user-top-read"].sort(),
+    [
+      "playlist-modify-private",
+      "playlist-read-private",
+      "user-library-read",
+      "user-read-private",
+      "user-read-recently-played",
+      "user-top-read",
+    ].sort(),
   );
   expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   expect(url.searchParams.get("state")).toMatch(/^[A-Za-z0-9._~-]{16}$/);

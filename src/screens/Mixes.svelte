@@ -1,5 +1,6 @@
 <script lang="ts">
 import type { Mix } from "../mixes.js";
+import * as spotify from "../spotify.js";
 import { openUri } from "../spotify.js";
 import { app } from "../state.svelte.js";
 import Cover from "../ui/Cover.svelte";
@@ -18,6 +19,16 @@ const first = $derived(app.mixes[0]);
   <h1>Mixes</h1>
   {#if first}<p class="lead">Say: “Hey Siri, play {first.playlistName} on Spotify”</p>{/if}
 
+  {#if app.needsReconnect}
+    <div class="card reconnect" role="status">
+      <div class="reconnect-title">Let Géza learn from your listening</div>
+      <p class="small muted">
+        Géza can now notice what you heart and play. Spotify needs you to confirm that once.
+      </p>
+      <button class="btn small" onclick={() => spotify.startLogin().catch((e) => app.notify(e))}>Reconnect Spotify</button>
+    </div>
+  {/if}
+
   <div class="grid">
     {#each app.mixes as mix (mix.id)}
       <div class="tile mix-{mix.id}">
@@ -33,6 +44,20 @@ const first = $derived(app.mixes[0]);
       </div>
     {/each}
   </div>
+
+  {#if app.learned && (app.learned.plays || app.learned.liked || app.learned.removedByYou || app.learned.addedByYou || !app.learned.complete)}
+    <p class="small muted learned">
+      Learned from your listening: {[
+        app.learned.plays ? `${app.learned.plays} play${app.learned.plays === 1 ? "" : "s"}` : "",
+        app.learned.liked ? `${app.learned.liked} liked` : "",
+        app.learned.addedByYou ? `${app.learned.addedByYou} added by you` : "",
+        app.learned.removedByYou ? `${app.learned.removedByYou} removed by you` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ") || "nothing new"}.
+      {#if !app.learned.complete}Some plays were missed; open Géza every day or two.{/if}
+    </p>
+  {/if}
 
   <a class="card row random" href="#/random">
     <span class="ico"><Icon name="sparkle" size={20} /></span>
@@ -66,6 +91,10 @@ const first = $derived(app.mixes[0]);
     display: inline-block; opacity: 1; background: var(--lime); color: var(--ink);
     padding: 1px 8px; border-radius: 10px;
   }
+  .reconnect { margin-top: 14px; padding: 16px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+  .reconnect-title { font-weight: 700; }
+  .reconnect p { margin: 0 0 6px; }
+  .learned { margin: 12px 8px 0; }
   .random { margin-top: 12px; min-height: 72px; }
   .random .ico {
     width: 40px; height: 40px; flex: none; border-radius: 12px; background: var(--lime);

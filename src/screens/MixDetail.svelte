@@ -1,4 +1,5 @@
 <script lang="ts">
+import { badge, loadLedger, type MixLedger } from "../ledger.js";
 import { loadSnapshots, type MixId, type Mode, SWAP_PCT } from "../mixes.js";
 import { prepareSwap, undoLastSwap } from "../prepare.js";
 import type { Track } from "../spotify.js";
@@ -9,16 +10,20 @@ import Cover from "../ui/Cover.svelte";
 import Icon from "../ui/Icon.svelte";
 import Radar from "../ui/Radar.svelte";
 
+const now = Date.now();
+
 let { id }: { id: MixId } = $props();
 const mix = $derived(app.mix(id));
 
 let tracks = $state<Track[] | null>(null);
+let ledger = $state<MixLedger | null>(null);
 let canUndo = $state(false);
 let note = $state("");
 
 async function load() {
   note = app.mix(id).note;
   canUndo = (await loadSnapshots(id)).length > 0;
+  ledger = await loadLedger(id);
   const playlistId = app.mix(id).playlistId;
   if (!playlistId) return;
   try {
@@ -28,6 +33,12 @@ async function load() {
     tracks = [];
   }
 }
+
+// Learning may finish after this screen opens: refresh the labels then.
+$effect(() => {
+  void app.learned;
+  void loadLedger(id).then((l) => (ledger = l));
+});
 
 $effect(() => {
   void id;
@@ -51,9 +62,11 @@ async function toggleLock(track: Track) {
 }
 
 async function prepare() {
-  const swap = await app.task("Starting…", (progress) =>
-    prepareSwap($state.snapshot(mix) as typeof mix, progress),
-  );
+  const swap = await app.task("Starting…", async (progress) => {
+    progress("Checking what you've listened to…");
+    await app.learn();
+    return prepareSwap($state.snapshot(app.mix(id)) as typeof mix, progress);
+  });
   if (swap) {
     app.pending[id] = swap;
     go(`/review/${id}`);
@@ -128,7 +141,9 @@ async function undo() {
           <div class="row">
             <div class="grow">
               <div class="title">{t.title}</div>
-              <div class="small muted">{t.artist}</div>
+              <div class="small muted">
+                {t.artist}{#if badge(ledger?.entries[t.id], now)}<span class="badge"> · {badge(ledger?.entries[t.id], now)}</span>{/if}
+              </div>
             </div>
             <button
               class="lock"
@@ -173,6 +188,7 @@ async function undo() {
     box-shadow: 0 0 0 1.5px var(--line); cursor: pointer; display: flex; flex-direction: column; gap: 2px;
   }
   .mode.on { box-shadow: 0 0 0 2px var(--ink); }
+  .badge { color: var(--ink); font-weight: 600; }
   .hint { margin: 8px 8px 0; }
   .notebox { margin-top: 14px; padding: 14px; }
   .notebox label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; margin-bottom: 10px; }

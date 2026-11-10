@@ -1,6 +1,7 @@
 // App-wide state (Svelte 5 runes) and the hash router.
 
 import * as claude from "./claude.js";
+import { type LearnSummary, learnFromSpotify } from "./learn.js";
 import { loadMixes, loadPending, type Mix, type MixId, type PendingSwap, saveMixes } from "./mixes.js";
 import * as spotify from "./spotify.js";
 import { type Profile, SessionExpiredError } from "./spotify.js";
@@ -49,11 +50,52 @@ class AppState {
 
   needsPlaylists = $derived(this.mixes.some((m) => !m.playlistId));
 
+  /** Spotify permissions are missing (login from before an update): ask to reconnect. */
+  needsReconnect = $state(false);
+  /** What the last sync with your Spotify listening found. */
+  learned = $state<LearnSummary | null>(null);
+  #learning: Promise<void> | null = null;
+
   constructor() {
     addEventListener("hashchange", () => {
       this.route = parseRoute(location.hash);
       scrollTo(0, 0);
     });
+    // Coming back to the app is when new listening has happened.
+    document.addEventListener("visibilitychange", () => {
+      const stale = !this.learned || Date.now() - this.learned.at > 5 * 60_000;
+      if (document.visibilityState === "visible" && stale) void this.learn();
+    });
+  }
+
+  /**
+   * Fold new plays, hearts and your own playlist edits into the mixes.
+   * Runs once at a time; failures are quiet (it's a background nicety),
+   * except an expired login, which sends you back to Welcome.
+   */
+  learn(): Promise<void> {
+    if (!this.loggedIn || this.needsReconnect || this.needsPlaylists || !navigator.onLine) {
+      return Promise.resolve();
+    }
+    this.#learning ??= (async () => {
+      try {
+        const { mixes, summary } = await learnFromSpotify($state.snapshot(this.mixes) as Mix[]);
+        // Take only what learning changes, so edits made meanwhile survive.
+        const byId = new Map(mixes.map((m) => [m.id, m]));
+        await this.setMixes(
+          this.mixes.map((m) => {
+            const learned = byId.get(m.id);
+            return learned ? { ...m, locked: learned.locked, blocked: learned.blocked } : m;
+          }),
+        );
+        this.learned = summary;
+      } catch (e) {
+        if (e instanceof SessionExpiredError) this.notify(e);
+      } finally {
+        this.#learning = null;
+      }
+    })();
+    return this.#learning;
   }
 
   async init(): Promise<void> {
@@ -70,6 +112,7 @@ class AppState {
       if (swap) this.pending[id] = swap;
     }
     if (this.loggedIn) {
+      this.needsReconnect = (await spotify.missingScopes()).length > 0;
       try {
         this.profile = await spotify.getProfile();
       } catch (e) {
@@ -77,6 +120,7 @@ class AppState {
       }
     }
     this.ready = true;
+    void this.learn();
   }
 
   mix(id: MixId): Mix {
