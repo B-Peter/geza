@@ -235,3 +235,52 @@ test("train: a no goes to “Géza · No” in Spotify, and a fresh device reads
   await expect(page.getByText("So far: 1 yes · 1 no")).toBeVisible();
   await expect(page.getByRole("link", { name: /Play “Géza · Yes” in Spotify · 1 songs/ })).toBeVisible();
 });
+
+test("train: a 502 (the app asleep) is explained, and Géza wakes the device and retries", async ({
+  page,
+  errors,
+}) => {
+  player.reject = { status: 502, message: "Bad gateway", times: 1 };
+  const expected = /status of 502/;
+  page.on("console", () => {
+    for (let i = errors.length - 1; i >= 0; i--) if (expected.test(errors[i] ?? "")) errors.splice(i, 1);
+  });
+  await seed(page, ready);
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  // The first play got a 502; a transfer with play:true and a retry fixed it.
+  await expect(page.getByText(/Playing on iPhone · started in/)).toBeVisible();
+  expect(player.transfers).toContain("phone1:play");
+  // The refused command isn't recorded as a play; the retry is.
+  expect(player.plays).toHaveLength(1);
+  for (let i = errors.length - 1; i >= 0; i--) if (expected.test(errors[i] ?? "")) errors.splice(i, 1);
+});
+
+test("train: play inside Géza with Spotify's embedded player, no app needed", async ({ page }) => {
+  player.list = [
+    { id: "mac1", name: "MacBook", type: "Computer", is_active: true },
+    { id: "phone1", name: "iPhone", type: "Smartphone", is_active: false },
+  ];
+  await seed(page, ready);
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  await page
+    .getByRole("region", { name: "Where should Train play?" })
+    .getByRole("button", { name: /Inside Géza/ })
+    .click();
+  const card = page.getByRole("article", { name: /Long Way Round/ });
+  await expect(card.locator("iframe.embed")).toHaveAttribute("src", /open\.spotify\.com\/embed\/track\/t101/);
+  await expect(page.getByText(/Playing inside Géza/)).toBeVisible();
+  expect(player.plays).toHaveLength(0);
+  await page.getByRole("button", { name: "Yes, I like it" }).click();
+  await expect(page.getByRole("article", { name: /Open Window/ }).locator("iframe.embed")).toHaveAttribute(
+    "src",
+    /embed\/track\/t102/,
+  );
+  expect(player.plays).toHaveLength(0);
+  // Remembered next time.
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  await expect(page.getByText(/Playing inside Géza/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Play on: inside Géza · Change" })).toBeVisible();
+});

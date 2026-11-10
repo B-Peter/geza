@@ -630,9 +630,13 @@ export function pickDevice(devices: Device[]): Device | null {
  * Move playback to a device without starting anything. Wakes a Spotify app
  * that is listed but idle, so the next play command actually sounds.
  */
-export async function transferTo(deviceId: string): Promise<void> {
-  await api("/me/player", { method: "PUT", body: { device_ids: [deviceId], play: false } });
+export async function transferTo(deviceId: string, play = false): Promise<void> {
+  await api("/me/player", { method: "PUT", body: { device_ids: [deviceId], play } });
 }
+
+/** Spotify's servers couldn't reach the app on that device (asleep in the background). */
+export const unreachable = (e: unknown): boolean =>
+  e instanceof SpotifyError && [502, 503, 504].includes(e.status);
 
 /**
  * Play `uris` as one list, starting with the first at `positionMs`. Spotify
@@ -640,10 +644,20 @@ export async function transferTo(deviceId: string): Promise<void> {
  * start quickly. One request does both the jump and the seek.
  */
 export async function playList(deviceId: string, uris: string[], positionMs: number): Promise<void> {
-  await api(`/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
-    method: "PUT",
-    body: { uris, offset: { position: 0 }, position_ms: Math.max(0, Math.round(positionMs)) },
-  });
+  const body = { uris, offset: { position: 0 }, position_ms: Math.max(0, Math.round(positionMs)) };
+  const path = `/me/player/play?device_id=${encodeURIComponent(deviceId)}`;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await api(path, { method: "PUT", body });
+      return;
+    } catch (e) {
+      // A 502 means the app on the device didn't answer: a transfer with
+      // play:true usually wakes it. Two more tries, then give up.
+      if (!unreachable(e) || attempt >= 2) throw e;
+      await transferTo(deviceId, true).catch(() => {});
+      await new Promise((r) => setTimeout(r, 800));
+    }
+  }
 }
 
 export async function pause(deviceId: string): Promise<void> {

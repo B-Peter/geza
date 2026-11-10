@@ -81,8 +81,8 @@ export const player = {
   list: [PHONE] as FakeDevice[],
   /** Accepts play commands but never actually plays (an app iOS put to sleep). */
   silent: false,
-  /** Reject play commands with this Spotify error (status and message). */
-  reject: null as { status: number; message: string } | null,
+  /** Reject play commands with this Spotify error; `times` limits how many (default: always). */
+  reject: null as { status: number; message: string; times?: number } | null,
   /** The device the last play went to. */
   on: null as string | null,
   playing: null as string | null,
@@ -176,13 +176,14 @@ export async function mockApis(page: Page): Promise<void> {
       return json({ is_playing: true, item: { id: player.playing }, device: { id: player.on } });
     }
     if (path === "/me/player" && route.request().method() === "PUT") {
-      const body = route.request().postDataJSON() as { device_ids: string[] };
-      player.transfers.push(body.device_ids[0] ?? "");
+      const body = route.request().postDataJSON() as { device_ids: string[]; play?: boolean };
+      player.transfers.push(`${body.device_ids[0] ?? ""}${body.play ? ":play" : ""}`);
       return route.fulfill({ status: 204, headers: CORS });
     }
     if (path === "/me/player/play" && route.request().method() === "PUT") {
       if (!player.devices) return json({ error: { message: "No active device found" } }, 404);
-      if (player.reject) return json({ error: { message: player.reject.message } }, player.reject.status);
+      if (player.reject && (player.reject.times === undefined || player.reject.times-- > 0))
+        return json({ error: { message: player.reject.message } }, player.reject.status);
       player.on = url.searchParams.get("device_id");
       const body = route.request().postDataJSON() as { uris: string[]; position_ms: number };
       player.plays.push({ ...body, device: url.searchParams.get("device_id") });
@@ -289,9 +290,16 @@ export async function mockApis(page: Page): Promise<void> {
     return json(url.pathname === "/ws/2/artist" ? { artists: [] } : { "release-groups": [] });
   });
 
+  // Spotify's embedded player: a blank page stands in for it.
+  await page.route(/^https:\/\/open\.spotify\.com\//, (route) =>
+    route.fulfill({ contentType: "text/html", body: "<!doctype html><title>embed</title>" }),
+  );
+
   // Fail loudly if anything else tries to reach the internet.
   await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, (route) => {
-    if (/api\.spotify\.com|api\.anthropic\.com|musicbrainz\.org/.test(route.request().url()))
+    if (
+      /api\.spotify\.com|api\.anthropic\.com|musicbrainz\.org|open\.spotify\.com/.test(route.request().url())
+    )
       return route.fallback();
     return route.abort();
   });

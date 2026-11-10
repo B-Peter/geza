@@ -22,6 +22,9 @@ import BackButton from "../ui/BackButton.svelte";
 import Icon from "../ui/Icon.svelte";
 
 let data = $state<TrainData | null>(null);
+const IN_APP_KEY = "ps.trainInApp";
+/** Play with Spotify's embedded player on the card, not through the Spotify app. */
+let inApp = $state(localStorage.getItem(IN_APP_KEY) === "1");
 let deck = $state<Card[]>([]);
 /** The current deck's id (its "at"), for the Deck done stats. */
 let deckAt = $state(0);
@@ -58,6 +61,7 @@ const firstYear = $derived(
 );
 const statusLine = $derived(
   [
+    inApp ? "Playing inside Géza: tap ▶ on the card" : "",
     startedIn !== null && device ? `Playing on ${device.name} · started in ${startedIn.toFixed(1)} s` : "",
     `${sessionYes} yes · ${sessionNo} no`,
   ]
@@ -98,6 +102,21 @@ $effect(() => {
 });
 
 const DEVICE_KEY = "ps.trainDevice";
+/** Plain words for what went wrong, above Spotify's own reply. */
+let hint = $state("");
+
+const embedUrl = (id: string) => `https://open.spotify.com/embed/track/${encodeURIComponent(id)}?theme=0`;
+
+function chooseInApp() {
+  inApp = true;
+  localStorage.setItem(IN_APP_KEY, "1");
+  if (device) void spotify.pause(device.id).catch(() => {});
+  device = null;
+  choosing = false;
+  blocked = null;
+  noSound = false;
+  playingSince = Date.now();
+}
 /** All Spotify devices, for the picker. */
 let devices = $state<spotify.Device[]>([]);
 /** The picker is open (no remembered device, or you tapped Change). */
@@ -114,6 +133,10 @@ async function loadDevices(): Promise<void> {
  * one usable device, use that; otherwise open the picker.
  */
 async function findDevice(): Promise<boolean> {
+  if (inApp) {
+    playingSince = Date.now();
+    return false;
+  }
   await loadDevices();
   const usable = devices.filter((d) => !d.is_restricted);
   const saved = localStorage.getItem(DEVICE_KEY);
@@ -124,6 +147,8 @@ async function findDevice(): Promise<boolean> {
 }
 
 function choose(d: spotify.Device) {
+  inApp = false;
+  localStorage.removeItem(IN_APP_KEY);
   device = d;
   localStorage.setItem(DEVICE_KEY, d.id);
   choosing = false;
@@ -160,11 +185,18 @@ let noSound = $state(false);
 /** Play the deck from card i; measure how long until Spotify plays it. */
 async function playFrom(i: number) {
   const current = deck[i];
-  if (!current || !device) return;
+  if (!current) return;
+  if (inApp) {
+    // The embedded player on the card does the playing; you tap it.
+    playingSince = Date.now();
+    return;
+  }
+  if (!device) return;
   const token = ++playToken;
   startedIn = null;
   playingSince = null;
   noSound = false;
+  hint = "";
   const t0 = performance.now();
   try {
     await spotify.playList(
@@ -175,6 +207,9 @@ async function playFrom(i: number) {
     lastReply = "Spotify accepted the play command.";
   } catch (e) {
     lastReply = e instanceof Error ? e.message : String(e);
+    if (spotify.unreachable(e)) {
+      hint = `Spotify's servers couldn't reach the Spotify app on “${device.name}”: iOS put it to sleep in the background. Open Spotify, play anything for a second, come back and try again. Or play inside Géza instead.`;
+    }
     if (e instanceof SpotifyError && e.status === 404) {
       // The device dropped off (asleep or closed): let you pick again.
       await changeDevice();
@@ -340,6 +375,10 @@ $effect(() => {
           </li>
         {/each}
       </ul>
+      <button class="device inapp" class:current={inApp} onclick={chooseInApp}>
+        <span class="device-name">Inside Géza</span>
+        <span class="small muted">Spotify's mini player on each card; no Spotify app needed. You tap ▶ on the card.</span>
+      </button>
       <p class="small muted">Not listed? Open Spotify on that device and play anything for a second.</p>
       <div class="two">
         <a class="btn secondary small" href="spotify:">Open Spotify</a>
@@ -361,6 +400,7 @@ $effect(() => {
       </p>
       <div class="two">
         <a class="btn secondary small" href="spotify:">Open Spotify</a>
+        <button class="btn secondary small" onclick={chooseInApp}>Play inside Géza</button>
         <button class="btn small" onclick={retrySpotify}>I'm back</button>
       </div>
     </div>
@@ -387,16 +427,26 @@ $effect(() => {
         onpointerup={up}
         onpointercancel={up}
       >
-        <div class="art">
-          {#if card.track.image}
+        <div class="art" class:embedded={inApp}>
+          {#if inApp}
+            <iframe
+              class="embed"
+              title={`Play ${card.track.title} by ${card.track.artist}`}
+              src={embedUrl(card.track.id)}
+              allow="encrypted-media; autoplay; clipboard-write"
+              loading="eager"
+            ></iframe>
+          {:else if card.track.image}
             <img src={card.track.image} alt="" draggable="false" />
           {:else}
             <div class="placeholder" aria-hidden="true"><Icon name="mixes" size={48} /></div>
           {/if}
-          <div class="playing small">
-            <span class="mini-eq" aria-hidden="true"><span></span><span></span><span></span></span>
-            In Spotify · from {mmss(startPosition(card.track))}{#if playingSince} · listening {mmss(listened * 1000)}{/if}
-          </div>
+          {#if !inApp}
+            <div class="playing small">
+              <span class="mini-eq" aria-hidden="true"><span></span><span></span><span></span></span>
+              In Spotify · from {mmss(startPosition(card.track))}{#if playingSince} · listening {mmss(listened * 1000)}{/if}
+            </div>
+          {/if}
         </div>
         <div class="info">
           <div class="title-row">
@@ -460,16 +510,18 @@ $effect(() => {
           Spotify on “{device?.name ?? "your device"}” didn't start. Open Spotify there, tap play on any song once, then
           come back and try again, or pick another device.
         </p>
+        {#if hint}<p class="small hint">{hint}</p>{/if}
         {#if lastReply}<p class="reply small">Spotify said: {lastReply}</p>{/if}
         <div class="two">
           <button class="btn secondary small" onclick={changeDevice}>Change device</button>
           <a class="btn secondary small" href="spotify:">Open Spotify</a>
+          <button class="btn secondary small" onclick={chooseInApp}>Play inside Géza</button>
           <button class="btn small" onclick={retrySpotify}>Try again</button>
         </div>
       </div>
     {/if}
-    {#if device && !choosing}
-      <button class="device-chip small" onclick={changeDevice}>Play on: {device.name} · Change</button>
+    {#if (device || inApp) && !choosing}
+      <button class="device-chip small" onclick={changeDevice}>Play on: {inApp ? "inside Géza" : device?.name} · Change</button>
     {/if}
     <p class="status small muted" aria-live="polite">{statusLine}</p>
   {:else if done}
@@ -583,6 +635,10 @@ $effect(() => {
   .fly-later { transform: translateY(-120%) !important; opacity: 0; }
   .art { position: relative; aspect-ratio: 7 / 5; background: var(--line); }
   .art img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .art.embedded { aspect-ratio: auto; height: 152px; background: var(--ink); }
+  .embed { display: block; width: 100%; height: 152px; border: 0; }
+  .device.inapp { border-style: dashed; }
+  .hint { margin: 0 0 4px; font-weight: 600; }
   .placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
   .playing {
     position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 8px;

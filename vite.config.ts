@@ -15,6 +15,8 @@ const CSP = [
   "img-src 'self' https://i.scdn.co",
   // MusicBrainz: open music database for original years and artist details.
   "connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://api.anthropic.com https://musicbrainz.org",
+  // Train can play each song in Spotify's embedded player (no Spotify app needed).
+  "frame-src https://open.spotify.com",
   "worker-src 'self'",
   "manifest-src 'self'",
   "base-uri 'none'",
