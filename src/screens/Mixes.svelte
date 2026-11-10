@@ -33,6 +33,15 @@ const first = $derived(app.mixes[0]);
       </div>
     {/each}
   </div>
+
+  <a class="card row random" href="#/random">
+    <span class="ico"><Icon name="sparkle" size={20} /></span>
+    <span class="grow">
+      <span class="title">Play something random</span>
+      <span class="small muted">Set a sound, Claude picks songs for right now</span>
+    </span>
+    <Icon name="arrow" size={20} />
+  </a>
 </main>
 
 <TabBar active="mixes" />
@@ -57,6 +66,13 @@ const first = $derived(app.mixes[0]);
     display: inline-block; opacity: 1; background: var(--lime); color: var(--ink);
     padding: 1px 8px; border-radius: 10px;
   }
+  .random { margin-top: 12px; min-height: 72px; }
+  .random .ico {
+    width: 40px; height: 40px; flex: none; border-radius: 12px; background: var(--lime);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .random .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .random .title { font-weight: 700; }
   .play {
     position: absolute; right: 12px; bottom: 12px; width: 44px; height: 44px; border-radius: 50%;
     background: var(--ink); color: var(--white); display: flex; align-items: center; justify-content: center;

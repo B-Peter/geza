@@ -7,6 +7,7 @@ import { app, go } from "../state.svelte.js";
 import BackButton from "../ui/BackButton.svelte";
 import Cover from "../ui/Cover.svelte";
 import Icon from "../ui/Icon.svelte";
+import Radar from "../ui/Radar.svelte";
 
 let { id }: { id: MixId } = $props();
 const mix = $derived(app.mix(id));
@@ -100,6 +101,10 @@ async function undo() {
       {/each}
     </div>
 
+    <div class="label">Sound</div>
+    <Radar tune={mix.tune} onchange={(tune) => app.updateMix(id, { tune })} label={`Sound of ${mix.name}`} />
+    <p class="small muted hint">Claude aims for this sound in the next swap.</p>
+
     <div class="card notebox">
       <label for="note"><Icon name="sparkle" size={18} />Note for Claude</label>
       <input
@@ -168,6 +173,7 @@ async function undo() {
     box-shadow: 0 0 0 1.5px var(--line); cursor: pointer; display: flex; flex-direction: column; gap: 2px;
   }
   .mode.on { box-shadow: 0 0 0 2px var(--ink); }
+  .hint { margin: 8px 8px 0; }
   .notebox { margin-top: 14px; padding: 14px; }
   .notebox label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; margin-bottom: 10px; }
   .notebox p { margin: 8px 0 0; }

@@ -41,6 +41,7 @@ const SCREENS: Screen[] = [
     path: "./#/settings",
     ready: (p) => p.getByText("Linked as Peter").waitFor(),
   },
+  { name: "random", seed: all, path: "./#/random", ready: (p) => p.getByText("Start from").waitFor() },
 ];
 
 /** Everything wrong with the current screen's layout, as readable lines. */

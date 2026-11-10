@@ -47,7 +47,8 @@ export async function ensurePlaylists(
   }
 }
 
-async function resolveAll(picks: Pick[]): Promise<Resolved[]> {
+/** Look up each pick on Spotify, four at a time (gentle on rate limits). */
+export async function resolveAll(picks: Pick[]): Promise<Resolved[]> {
   const out: Resolved[] = new Array(picks.length);
   let next = 0;
   const worker = async () => {

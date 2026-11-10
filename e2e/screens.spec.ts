@@ -112,3 +112,56 @@ test("security: the Spotify login asks only for the scopes the app uses", async 
   expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   expect(url.searchParams.get("state")).toMatch(/^[A-Za-z0-9._~-]{16}$/);
 });
+
+test("08 play something", async ({ page }) => {
+  await seed(page, { loggedIn: true, claudeKey: true, playlists: true });
+  await open(page, "./#/random");
+  await expect(page.getByRole("heading", { name: "Play something" })).toBeVisible();
+  await snap(page, "08-random");
+});
+
+test("flow: tune a mix with the spider graph", async ({ page }) => {
+  await seed(page, { loggedIn: true, claudeKey: true, playlists: true });
+  await open(page, "./#/mix/driving");
+  const graph = page.getByRole("group", { name: "Sound of Driving" });
+  await expect(graph).toBeVisible();
+  // Driving starts at tempo 4 ("Brisk"); the stepper changes the selected axis.
+  await expect(graph.getByText("Brisk", { exact: true })).toBeVisible();
+  await graph.getByRole("button", { name: "More tempo" }).click();
+  await expect(graph.getByText("Racing", { exact: true })).toBeVisible();
+  // Tapping the graph near the top selects Mood at the tapped level.
+  const svg = graph.locator("svg");
+  const box = await svg.boundingBox();
+  if (!box) throw new Error("no graph");
+  // Mood axis points up from the centre (175,170) in a 350x330 drawing; level 1 is 1/5 of the radius.
+  await svg.click({ position: { x: (175 / 350) * box.width, y: ((170 - 94 / 5) / 330) * box.height } });
+  await expect(graph.getByRole("button", { name: "Mood", pressed: true })).toBeVisible();
+  await expect(graph.getByText("Gloomy", { exact: true })).toBeVisible();
+  // The change is saved: after a reload the stepper (back on Tempo) still shows it.
+  await page.reload();
+  await expect(
+    page.getByRole("group", { name: "Sound of Driving" }).getByText("Racing", { exact: true }),
+  ).toBeVisible();
+});
+
+test("flow: play something random", async ({ page }) => {
+  await seed(page, { loggedIn: true, claudeKey: true, playlists: true });
+  await open(page, "./#/");
+  await page.getByRole("link", { name: /Play something random/ }).click();
+  await page.getByRole("button", { name: "Focus" }).click();
+  await expect(page.getByRole("button", { name: "Focus", pressed: true })).toBeVisible();
+
+  const created = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/me/playlists"));
+  const write = page.waitForRequest((r) => r.method() === "PUT" && r.url().includes("/items"));
+  await page.getByRole("button", { name: "Pick 20 songs" }).click();
+  expect((await created).postDataJSON()).toMatchObject({ name: "Studio Random", public: false });
+  expect(((await write).postDataJSON() as { uris: string[] }).uris).toEqual([
+    "spotify:track:t101",
+    "spotify:track:t102",
+  ]);
+  await expect(page.getByText(/2 songs ready in “Studio Random”/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Play in Spotify" })).toHaveAttribute(
+    "href",
+    "spotify:playlist:pl-studio-random",
+  );
+});

@@ -10,6 +10,7 @@ export type Route =
   | { name: "mix"; id: MixId }
   | { name: "review"; id: MixId }
   | { name: "settings" }
+  | { name: "random" }
   | { name: "key" };
 
 const MIX_IDS: MixId[] = ["driving", "working", "cooking", "home"];
@@ -20,6 +21,7 @@ function parseRoute(hash: string): Route {
   if (name === "mix" && mixId) return { name: "mix", id: mixId };
   if (name === "review" && mixId) return { name: "review", id: mixId };
   if (name === "settings") return { name: "settings" };
+  if (name === "random") return { name: "random" };
   if (name === "key") return { name: "key" };
   return { name: "mixes" };
 }

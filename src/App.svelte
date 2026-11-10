@@ -2,6 +2,7 @@
 import KeySetup from "./screens/KeySetup.svelte";
 import MixDetail from "./screens/MixDetail.svelte";
 import Mixes from "./screens/Mixes.svelte";
+import Random from "./screens/Random.svelte";
 import Review from "./screens/Review.svelte";
 import Settings from "./screens/Settings.svelte";
 import Setup from "./screens/Setup.svelte";
@@ -21,6 +22,8 @@ import { app } from "./state.svelte.js";
   <MixDetail id={app.route.id} />
 {:else if app.route.name === "review"}
   <Review id={app.route.id} />
+{:else if app.route.name === "random"}
+  <Random />
 {:else if app.route.name === "settings"}
   <Settings />
 {:else}
