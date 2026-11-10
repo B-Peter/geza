@@ -4,8 +4,7 @@ test.afterEach(({ errors }) => {
   expect(errors, "console errors").toEqual([]);
 });
 
-const ready = { loggedIn: true, claudeKey: true, playlists: true, spotifyApp: true } as const;
-const embedded = { loggedIn: true, claudeKey: true, playlists: true } as const;
+const ready = { loggedIn: true, claudeKey: true, playlists: true } as const;
 
 test("10 train start", async ({ page }) => {
   await seed(page, ready);
@@ -181,19 +180,33 @@ test("train: confirms the sound for every song, not just the first", async ({ pa
   await expect(page.getByText(/Playing on iPhone · started in/)).toBeVisible();
 });
 
-test("train: says so when Spotify accepts but stays silent", async ({ page }) => {
+test("train: a silent device sends you to Spotify; the device you start there takes over", async ({
+  page,
+}) => {
+  // The laptop Géza remembers is asleep, but still on Spotify's list: it
+  // accepts the play command and nothing happens.
+  const mac = { id: "mac1", name: "MacBook", type: "Computer", is_active: false };
+  player.list = [mac];
   player.silent = true;
   await seed(page, ready);
+  await page.evaluate(() => localStorage.setItem("ps.trainDevice", "mac1"));
   await open(page, "./#/train");
   await page.getByRole("button", { name: "Start a deck" }).click();
-  const alert = page.getByRole("alert").filter({ hasText: "No sound?" });
-  await expect(alert).toBeVisible();
-  await expect(alert.getByText(/Spotify on “iPhone” didn't start/)).toBeVisible();
-  // You opened Spotify and pressed play; trying again now works.
+  await expect(page.getByText("Start the deck in Spotify")).toBeVisible();
+  await expect(page.getByText(/Spotify on “MacBook” isn't answering/)).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open the deck in Spotify" })).toHaveAttribute(
+    "href",
+    "spotify:playlist:pl-g-za-deck",
+  );
+  // You pressed play in Spotify on the phone and came back: the phone is awake, so it wins.
+  player.list = [mac, { id: "phone1", name: "iPhone", type: "Smartphone", is_active: true }];
   player.silent = false;
-  await alert.getByRole("button", { name: "Try again" }).click();
+  await page.getByRole("button", { name: "I'm back" }).click();
   await expect(page.getByText(/Playing on iPhone · started in/)).toBeVisible();
-  await expect(alert).toHaveCount(0);
+  await expect(page.getByText("Start the deck in Spotify")).toHaveCount(0);
+  expect(player.plays.at(-1)?.device).toBe("phone1");
+  // ...and it is the device Géza remembers from now on.
+  expect(await page.evaluate(() => localStorage.getItem("ps.trainDevice"))).toBe("phone1");
 });
 
 test("train: one real song per artist Claude names; the start screen shows how the last deck went", async ({

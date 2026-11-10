@@ -67,14 +67,6 @@ const TOP_TRACKS: Record<string, unknown[]> = {
 type FakeDevice = { id: string; name: string; type: string; is_active: boolean };
 const PHONE: FakeDevice = { id: "phone1", name: "iPhone", type: "Smartphone", is_active: true };
 
-/** The embedded player stand-in: does it start when told to play? */
-export const embed = {
-  autoplay: true,
-  reset() {
-    this.autoplay = true;
-  },
-};
-
 /** Playlists in the tester's Spotify library (none by default). */
 export const library = {
   playlists: [] as { id: string; name: string; tracks: unknown[] }[],
@@ -280,6 +272,46 @@ export async function mockApis(page: Page): Promise<void> {
     const deck = post.includes("judged_artists");
     // Decks ask in three batches; the "close" one names the test artists, the others none.
     const artists = /focus.{0,6}close/.test(post) ? CLAUDE_ARTISTS : { artists: [] };
+    if (/"stream":s*true/.test(post)) {
+      // A streamed answer, cut into pieces in the middle of an artist, like the real thing.
+      const text = JSON.stringify(deck ? artists : CLAUDE_PICKS);
+      const pieces = [text.slice(0, 40), text.slice(40, 95), text.slice(95)].filter(Boolean);
+      const event = (data: { type: string } & Record<string, unknown>) =>
+        `event: ${data.type}
+data: ${JSON.stringify(data)}
+
+`;
+      return route.fulfill({
+        contentType: "text/event-stream",
+        headers: CORS,
+        body: [
+          event({
+            type: "message_start",
+            message: {
+              id: "msg_test",
+              type: "message",
+              role: "assistant",
+              model: "claude-haiku-5-5",
+              content: [],
+              stop_reason: null,
+              stop_sequence: null,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+          }),
+          event({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+          ...pieces.map((piece) =>
+            event({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: piece } }),
+          ),
+          event({ type: "content_block_stop", index: 0 }),
+          event({
+            type: "message_delta",
+            delta: { stop_reason: "end_turn", stop_sequence: null },
+            usage: { output_tokens: 1 },
+          }),
+          event({ type: "message_stop" }),
+        ].join(""),
+      });
+    }
     return route.fulfill({
       contentType: "application/json",
       headers: CORS,
@@ -328,37 +360,6 @@ export async function mockApis(page: Page): Promise<void> {
     return json(url.pathname === "/ws/2/artist" ? { artists: [] } : { "release-groups": [] });
   });
 
-  // Spotify's embedded player: a stand-in that speaks the same postMessage
-  // protocol (ready → play → playback_update). `embed.autoplay` = false acts
-  // like a browser that blocks autoplay.
-  await page.route(/^https:\/\/open\.spotify\.com\//, (route) =>
-    route.fulfill({
-      contentType: "text/html",
-      body: `<!doctype html><title>embed</title><button id="p">play</button><p id="song">song 0</p><script>
-        // Like Spotify's player: one song at a time; seeking to the end moves on to the next one.
-        let song = 0, position = 0, paused = true;
-        const tell = (m) => parent.postMessage(m, "*");
-        const update = () => {
-          document.getElementById("song").textContent = "song " + song + (paused ? " paused" : " playing");
-          tell({ type: "playback_update", payload: { isPaused: paused, position, duration: 30000 } });
-        };
-        const play = () => { paused = false; position = Math.max(position, 1000); update(); };
-        addEventListener("message", (e) => {
-          const c = e.data && e.data.command;
-          if (c === "play" && ${embed.autoplay}) play();
-          if (c === "resume") { paused = false; update(); }
-          if (c === "pause") { paused = true; update(); }
-          if (c === "seek") {
-            if (e.data.timestamp >= 28) { song++; position = 0; } else position = e.data.timestamp * 1000;
-            update();
-          }
-        });
-        document.getElementById("p").onclick = play;
-        tell({ type: "ready" });
-      </script>`,
-    }),
-  );
-
   // Fail loudly if anything else tries to reach the internet.
   await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, (route) => {
     if (
@@ -376,8 +377,6 @@ export interface SeedOptions {
   pendingSwap?: boolean;
   /** A login from before Géza asked for the listening permissions. */
   oldLogin?: boolean;
-  /** Train plays through the Spotify app instead of the embedded player. */
-  spotifyApp?: boolean;
 }
 
 export const ALL_SCOPES =
@@ -394,8 +393,6 @@ export async function seed(page: Page, opts: SeedOptions): Promise<void> {
       const store = await load("/src/store.ts");
       const mixes = await load("/src/mixes.ts");
       localStorage.setItem("ps.spotifyClientId", "test-client-id");
-      if (o.spotifyApp) localStorage.setItem("ps.trainInApp", "0");
-      else localStorage.removeItem("ps.trainInApp");
       if (o.loggedIn) {
         await store.setSecret("spotifyTokens", {
           access_token: "test-access",
@@ -463,7 +460,6 @@ export const test = base.extend<{ errors: string[] }>({
       // Fresh fake Spotify app for every test.
       player.reset();
       library.reset();
-      embed.reset();
       await mockApis(page);
       await use(errors);
     },

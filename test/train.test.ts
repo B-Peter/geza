@@ -119,6 +119,30 @@ describe("deckFromArtists", () => {
   });
 });
 
+describe("deckFromArtists, adding to a deck", () => {
+  const known = { trackIds: new Set<string>(), artists: new Set(["k1", "k2", "k3", "k4"]) };
+  const deal = (name: string, want: "hit" | "deep cut" = "hit") => ({
+    pick: artist(name, want),
+    tracks: top(name, ["x", "y"]),
+  });
+  it("returns only new cards: no artist twice, the familiar cap counts across the whole deck", () => {
+    const have = deckFromArtists([deal("A"), deal("K1"), deal("K2")], empty, known);
+    expect(have.map((c) => c.track.artist)).toEqual(["A", "K1", "K2"]);
+    const more = deckFromArtists([deal("A"), deal("K3"), deal("K4"), deal("B")], empty, known, have);
+    // A is already in the deck; K3 is the third (and last) familiar artist.
+    expect(more.map((c) => c.track.artist)).toEqual(["K3", "B"]);
+  });
+  it("stops when the deck is full", () => {
+    const have = deckFromArtists(
+      Array.from({ length: 20 }, (_, i) => deal(`N${i}`)),
+      empty,
+      known,
+    );
+    expect(have).toHaveLength(15);
+    expect(deckFromArtists([deal("Z")], empty, known, have)).toEqual([]);
+  });
+});
+
 describe("deckOutcome", () => {
   it("counts the verdicts of one deck only", () => {
     const h = (verdict: "yes" | "no" | "later", deck: number) => ({

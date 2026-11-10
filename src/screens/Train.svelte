@@ -127,17 +127,19 @@ async function loadDevices(): Promise<void> {
 
 /**
  * Use the device you picked before if Spotify still lists it; with exactly
- * one usable device, use that; otherwise open the picker.
+ * one usable device, use that; otherwise open the picker. After a failed
+ * start (`awake`), the device that is active right now wins instead: it's
+ * the one you just pressed play on, and the remembered one didn't answer.
  */
-async function findDevice(preferActive = false): Promise<boolean> {
+async function findDevice(awake = false): Promise<boolean> {
   await loadDevices();
   const usable = devices.filter((d) => !d.is_restricted);
-  const saved = localStorage.getItem(DEVICE_KEY);
-  device =
-    usable.find((d) => d.id === saved) ??
-    // Back from Spotify: whatever you just pressed play on wins.
-    (preferActive ? usable.find((d) => d.is_active) : undefined) ??
-    (usable.length === 1 ? (usable[0] ?? null) : null);
+  const saved = usable.find((d) => d.id === localStorage.getItem(DEVICE_KEY));
+  const active = usable.find((d) => d.is_active);
+  const only = usable.length === 1 ? usable[0] : undefined;
+  device = (awake ? (active ?? saved) : (saved ?? active)) ?? only ?? null;
+  // No saved choice yet and several devices: you pick (once).
+  if (!awake && !saved && usable.length > 1) device = null;
   blocked = devices.length === 0 ? "spotify" : null;
   choosing = devices.length > 0 && !device;
   return Boolean(device);
@@ -222,16 +224,22 @@ async function playFrom(i: number) {
     if (spotify.isPlayingTrack(playing, current.track)) {
       startedIn = (performance.now() - t0) / 1000;
       playingSince = Date.now();
+      // The device that really plays is the one to remember.
+      const actual = devices.find((d) => d.id === playing?.deviceId);
+      if (actual && actual.id !== device.id) device = actual;
+      localStorage.setItem(DEVICE_KEY, device.id);
       return;
     }
     await new Promise((r) => setTimeout(r, 150));
   }
-  // Spotify said yes, but nothing is playing: usually an app the system put
-  // to sleep. Say so instead of failing silently.
+  // Spotify said yes, but nothing is playing: the device is asleep or gone
+  // (a closed laptop stays on Spotify's list for a while). Starting the deck
+  // in the Spotify app is the way out.
   if (token === playToken) {
     const state = await spotify.nowPlaying().catch(() => null);
-    lastReply = `${lastReply} But it didn't start within 3 seconds. ${spotify.describePlayback(state)}`;
-    noSound = true;
+    lastReply = `${lastReply} But nothing started on “${device.name}”. ${spotify.describePlayback(state)}`;
+    playingSince = null;
+    blocked = "spotify";
   }
 }
 
@@ -347,7 +355,8 @@ function decide(verdict: Verdict) {
   void judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell, extra).then((d) => {
     data = { ...d, deckPlaylistId: data?.deckPlaylistId ?? d.deckPlaylistId };
     // Near the end of a deck, prepare the next one with your latest swipes.
-    if (next === deck.length - 5) prefetchDeck(d);
+    if (!more && deck.length - next <= 5)
+      prefetchDeck(d, { at: deckAt, cards: $state.snapshot(deck.slice(next)) as Card[] });
   });
   setTimeout(() => {
     index = next;
@@ -435,13 +444,22 @@ $effect(() => {
       </div>
       <div class="notice-title">Start the deck in Spotify</div>
       <p class="small muted">
-        Your Spotify app is asleep, so Géza can't start it from here. Tap below, press play in Spotify once, then come
-        back: Spotify stays awake while it plays, and every swipe moves it to the next song.
+        {device ? `Spotify on “${device.name}” isn't answering` : "Spotify isn't running"}, so Géza can't start it from
+        here. Tap below, press play in Spotify once, then come back: every swipe then moves it to the next song.
       </p>
       <div class="two">
         <a class="btn small" href={openDeckHref}>Open the deck in Spotify</a>
         <button class="btn secondary small" onclick={retrySpotify}>I'm back</button>
+        {#if devices.length > 0}
+          <button class="btn secondary small" onclick={changeDevice}>Change device</button>
+        {/if}
       </div>
+      {#if lastReply}
+        <details class="small muted said">
+          <summary>What Spotify said</summary>
+          {lastReply}
+        </details>
+      {/if}
     </div>
   {:else if blocked === "premium"}
     <div class="card notice" role="status">
@@ -625,6 +643,8 @@ $effect(() => {
   .notice-title { font: 800 22px/26px var(--display); }
   .notice-title.big { font-size: 32px; line-height: 36px; }
   .two { display: flex; gap: 10px; flex-wrap: wrap; }
+  .said { margin-top: 4px; word-break: break-word; }
+  .said summary { cursor: pointer; padding: 6px 0; }
   .wake { position: relative; width: 132px; height: 96px; margin: 4px auto 6px; }
   .wake .phone {
     position: absolute; left: 0; top: 10px; width: 58px; height: 84px; border-radius: 14px; background: var(--ink);

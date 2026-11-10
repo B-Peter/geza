@@ -187,6 +187,18 @@ const PICKS_SCHEMA = {
  */
 export type Effort = "low" | "medium";
 
+/** The request every call sends: JSON in, JSON matching the schema out. */
+const request = (system: string, input: unknown, schema: Record<string, unknown>, effort: Effort) => ({
+  model: MODEL,
+  max_tokens: 16000,
+  output_config: {
+    effort,
+    format: { type: "json_schema" as const, schema },
+  },
+  system,
+  messages: [{ role: "user" as const, content: JSON.stringify(input) }],
+});
+
 async function ask<T>(
   system: string,
   input: unknown,
@@ -197,16 +209,7 @@ async function ask<T>(
   if (!apiKey) throw new Error("Add your Claude key first.");
   let response: Anthropic.Message;
   try {
-    response = await client(apiKey).messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      output_config: {
-        effort,
-        format: { type: "json_schema", schema },
-      },
-      system,
-      messages: [{ role: "user", content: JSON.stringify(input, null, 2) }],
-    });
+    response = await client(apiKey).messages.create(request(system, input, schema, effort));
   } catch (e) {
     throw new Error(describeError(e));
   }
@@ -300,8 +303,78 @@ const ARTISTS_SCHEMA = {
   additionalProperties: false,
 };
 
-export async function pickArtists(input: DeckInput, effort: Effort = "low"): Promise<ArtistPick[]> {
-  const out = await ask<{ artists: ArtistPick[] }>(DECK_PROMPT, input, ARTISTS_SCHEMA, effort);
-  if (!Array.isArray(out?.artists)) throw new Error("Claude's answer didn't match the expected shape.");
-  return out.artists.filter((a) => typeof a?.artist === "string" && a.artist.trim());
+/**
+ * Finds the objects one level inside the root while JSON text is still
+ * arriving ({"artists":[{…},{…}]} → each {…}), so an answer can be used
+ * piece by piece instead of only when it ends.
+ */
+export class ObjectScanner {
+  private text = "";
+  private at = 0;
+  private depth = 0;
+  private start = -1;
+  private inString = false;
+  private escaped = false;
+
+  /** Add the next piece of text; returns the objects it completed, as JSON. */
+  push(delta: string): string[] {
+    this.text += delta;
+    const done: string[] = [];
+    for (; this.at < this.text.length; this.at++) {
+      const c = this.text[this.at];
+      if (this.inString) {
+        if (this.escaped) this.escaped = false;
+        else if (c === "\\") this.escaped = true;
+        else if (c === '"') this.inString = false;
+      } else if (c === '"') this.inString = true;
+      else if (c === "{") {
+        this.depth++;
+        if (this.depth === 2) this.start = this.at;
+      } else if (c === "}") {
+        if (this.depth === 2 && this.start >= 0) done.push(this.text.slice(this.start, this.at + 1));
+        this.depth--;
+      }
+    }
+    return done;
+  }
+}
+
+/**
+ * Ask for artists and hand each one over the moment Claude has written it
+ * (the answer is streamed), so their songs can be looked up while the rest
+ * is still coming. Resolves with all of them.
+ */
+export async function streamArtists(
+  input: DeckInput,
+  onPick: (pick: ArtistPick) => void,
+  effort: Effort = "low",
+): Promise<ArtistPick[]> {
+  const apiKey = await getSecret<string>(KEY_SECRET);
+  if (!apiKey) throw new Error("Add your Claude key first.");
+  const scanner = new ObjectScanner();
+  const picks: ArtistPick[] = [];
+  const take = (delta: string) => {
+    for (const raw of scanner.push(delta)) {
+      let pick: ArtistPick;
+      try {
+        pick = JSON.parse(raw) as ArtistPick;
+      } catch {
+        continue;
+      }
+      if (typeof pick?.artist !== "string" || !pick.artist.trim()) continue;
+      picks.push(pick);
+      onPick(pick);
+    }
+  };
+  try {
+    const stream = client(apiKey).messages.stream(request(DECK_PROMPT, input, ARTISTS_SCHEMA, effort));
+    stream.on("text", take);
+    const message = await stream.finalMessage();
+    if (message.stop_reason === "refusal") throw new Error("Claude declined this request.");
+  } catch (e) {
+    // A connection that broke midway: what already arrived still counts.
+    if (picks.length > 0) return picks;
+    throw new Error(describeError(e));
+  }
+  return picks;
 }

@@ -1,7 +1,9 @@
 <script lang="ts">
 import * as claude from "../claude.js";
+import { forgetDecks } from "../deckCache.js";
 import * as spotify from "../spotify.js";
 import { app, go } from "../state.svelte.js";
+import { forgetListening } from "../train.js";
 import Icon from "../ui/Icon.svelte";
 import TabBar from "../ui/TabBar.svelte";
 
@@ -21,6 +23,8 @@ async function removeKey() {
 async function logout() {
   if (!confirm("Log out of Spotify on this device? Your playlists stay in Spotify.")) return;
   await spotify.logout();
+  // The next account has its own listening; nothing prepared for this one is kept.
+  await Promise.all([forgetListening(), forgetDecks()]).catch(() => {});
   app.loggedIn = false;
   app.profile = null;
 }
