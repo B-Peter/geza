@@ -1,4 +1,4 @@
-import { embed, expect, library, open, player, SEARCH_RESULTS, seed, snap, test } from "./fixtures.js";
+import { expect, library, open, player, SEARCH_RESULTS, seed, snap, test } from "./fixtures.js";
 
 test.afterEach(({ errors }) => {
   expect(errors, "console errors").toEqual([]);
@@ -42,7 +42,10 @@ test("flow: swipe yes and no; yes lands in Géza · Yes; taste is recorded", asy
   await page.getByRole("button", { name: "Start a deck" }).click();
   await expect(page.getByRole("article", { name: /Long Way Round/ })).toBeVisible();
 
-  const created = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/me/playlists"));
+  const created = page.waitForRequest(
+    (r) =>
+      r.method() === "POST" && r.url().endsWith("/me/playlists") && !/Géza · Deck/.test(r.postData() ?? ""),
+  );
   const added = page.waitForRequest(
     (r) => r.method() === "POST" && /\/playlists\/[^/]+\/items$/.test(r.url()),
   );
@@ -86,13 +89,16 @@ test("train: asks to wake Spotify when it isn't running", async ({ page }) => {
   await seed(page, ready);
   await open(page, "./#/train");
   await page.getByRole("button", { name: "Start a deck" }).click();
-  await expect(page.getByText("Wake up Spotify")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open Spotify" })).toHaveAttribute("href", "spotify:");
+  await expect(page.getByText("Start the deck in Spotify")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open the deck in Spotify" })).toHaveAttribute(
+    "href",
+    "spotify:playlist:pl-g-za-deck",
+  );
   // Spotify opened meanwhile: "I'm back" starts the deck.
   player.devices = true;
   await page.getByRole("button", { name: "I'm back" }).click();
   await expect(page.getByRole("article", { name: /Long Way Round/ })).toBeVisible();
-  await expect(page.getByText("Wake up Spotify")).toHaveCount(0);
+  await expect(page.getByText("Start the deck in Spotify")).toHaveCount(0);
 });
 
 test("train: MusicBrainz adds the original year, origin and genres", async ({ page }) => {
@@ -216,7 +222,10 @@ test("train: a no goes to “Géza · No” in Spotify, and a fresh device reads
   await open(page, "./#/train");
   await page.getByRole("button", { name: "Start a deck" }).click();
   await expect(page.getByRole("article", { name: /Long Way Round/ })).toBeVisible();
-  const created = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/me/playlists"));
+  const created = page.waitForRequest(
+    (r) =>
+      r.method() === "POST" && r.url().endsWith("/me/playlists") && !/Géza · Deck/.test(r.postData() ?? ""),
+  );
   await page.getByRole("button", { name: "No, never suggest it" }).click();
   expect((await created).postDataJSON()).toMatchObject({ name: "Géza · No", public: false });
 
@@ -257,90 +266,37 @@ test("train: a 502 (the app asleep) is explained, and Géza wakes the device and
   for (let i = errors.length - 1; i >= 0; i--) if (expected.test(errors[i] ?? "")) errors.splice(i, 1);
 });
 
-test("train: by default plays inside Géza and starts each card on its own", async ({ page }) => {
-  player.list = [
-    { id: "mac1", name: "MacBook", type: "Computer", is_active: true },
-    { id: "phone1", name: "iPhone", type: "Smartphone", is_active: false },
-  ];
-  await seed(page, embedded);
-  await open(page, "./#/train");
-  await page.getByRole("button", { name: "Start a deck" }).click();
-  // No device picker: the embedded player is the default.
-  await expect(page.getByRole("region", { name: "Where should Train play?" })).toHaveCount(0);
-  const card = page.getByRole("article", { name: /Long Way Round/ });
-  await expect(card.locator("iframe.embed")).toHaveAttribute("src", /open\.spotify\.com\/embed\/track\/t101/);
-  await expect(page.getByText(/Playing inside Géza/)).toBeVisible();
-  await page.getByRole("button", { name: "Yes, I like it" }).click();
-  const next = page.getByRole("article", { name: /Open Window/ });
-  await expect(next.locator("iframe.embed")).toHaveAttribute("src", /embed\/track\/t102/);
-  await expect(page.getByText(/Playing inside Géza/)).toBeVisible();
-  expect(player.plays).toHaveLength(0);
-  await expect(page.getByRole("button", { name: "Play on: inside Géza · Change" })).toBeVisible();
-});
-
-test("train: without the deck playlist, each card has a player and asks for a tap", async ({
+test("train: the deck plays from the “Géza · Deck” playlist; asleep, Spotify opens on it", async ({
   page,
   errors,
 }) => {
-  embed.autoplay = false;
-  library.noPublic = true;
-  // Spotify refuses the public playlist (403); the app then tries the older playlist route (404 here).
-  const expected = /status of 40[34]/;
+  player.reject = { status: 502, message: "Bad gateway" };
+  const expected = /status of 502/;
   page.on("console", () => {
     for (let i = errors.length - 1; i >= 0; i--) if (expected.test(errors[i] ?? "")) errors.splice(i, 1);
   });
-  await seed(page, embedded);
+  await seed(page, ready);
   await open(page, "./#/train");
-  await page.getByRole("button", { name: "Start a deck" }).click();
-  await expect(page.getByText("Tap ▶ on the card to start")).toBeVisible();
-  await page.frameLocator("iframe.embed").getByRole("button", { name: "play" }).click();
-  await expect(page.getByText(/Playing inside Géza/)).toBeVisible();
-});
-
-test("train: you can switch to the Spotify app, and back", async ({ page }) => {
-  await seed(page, embedded);
-  await open(page, "./#/train");
-  await page.getByRole("button", { name: "Start a deck" }).click();
-  await page.getByRole("button", { name: "Play on: inside Géza · Change" }).click();
-  await page
-    .getByRole("region", { name: "Where should Train play?" })
-    .getByRole("button", { name: /iPhone/ })
-    .click();
-  await expect(page.getByText(/Playing on iPhone · started in/)).toBeVisible();
-  await page.getByRole("button", { name: "Play on: iPhone · Change" }).click();
-  await page
-    .getByRole("region", { name: "Where should Train play?" })
-    .getByRole("button", { name: /Inside Géza/ })
-    .click();
-  await expect(page.getByText(/Playing inside Géza/)).toBeVisible();
-});
-
-test("train: the whole deck plays in one player; one tap, then each swipe moves it on", async ({ page }) => {
-  embed.autoplay = false; // like iOS: nothing plays before a tap inside the player
-  await seed(page, embedded);
-  await open(page, "./#/train");
-  const created = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/me/playlists"));
-  const filled = page.waitForRequest(
-    (r) => r.method() === "PUT" && /\/playlists\/[^/]+\/items$/.test(r.url()),
+  const deckList = page.waitForRequest(
+    (r) =>
+      r.method() === "POST" && r.url().endsWith("/me/playlists") && /Géza · Deck/.test(r.postData() ?? ""),
   );
   await page.getByRole("button", { name: "Start a deck" }).click();
-  expect((await created).postDataJSON()).toMatchObject({ name: "Géza · Deck", public: true });
-  expect((await filled).postDataJSON()).toEqual({ uris: ["spotify:track:t101", "spotify:track:t102"] });
-
-  const player = page.locator(".deck-player iframe");
-  await expect(player).toHaveAttribute("src", /open\.spotify\.com\/embed\/playlist\/pl-g-za-deck/);
-  // The cards show covers, not players of their own.
-  await expect(page.getByRole("article", { name: /Long Way Round/ }).locator("iframe")).toHaveCount(0);
-  await expect(page.getByText(/Tap ▶ on the player once/)).toBeVisible();
-
-  // The one tap.
-  const inside = page.frameLocator(".deck-player iframe");
-  await inside.getByRole("button", { name: "play" }).click();
-  await expect(inside.getByText("song 0 playing")).toBeVisible();
-  await expect(page.getByText(/Playing inside Géza/)).toBeVisible();
-
-  // A swipe moves the same player on, no new tap needed.
+  expect((await deckList).postDataJSON()).toMatchObject({ name: "Géza · Deck", public: false });
+  // The app is asleep: one tap opens Spotify on the deck.
+  await expect(page.getByText("Start the deck in Spotify")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open the deck in Spotify" })).toHaveAttribute(
+    "href",
+    "spotify:playlist:pl-g-za-deck",
+  );
+  // You pressed play there and came back.
+  player.reject = null;
+  await page.getByRole("button", { name: "I'm back" }).click();
+  await expect(page.getByText(/Playing on iPhone · started in/)).toBeVisible();
+  expect(player.plays.at(-1)).toMatchObject({ context: "spotify:playlist:pl-g-za-deck" });
+  // A swipe moves on inside the same playlist.
   await page.getByRole("button", { name: "Yes, I like it" }).click();
   await expect(page.getByRole("article", { name: /Open Window/ })).toBeVisible();
-  await expect(inside.getByText("song 1 playing")).toBeVisible();
+  await expect.poll(() => player.plays.at(-1)?.uris).toEqual(["spotify:track:t102"]);
+  for (let i = errors.length - 1; i >= 0; i--) if (expected.test(errors[i] ?? "")) errors.splice(i, 1);
 });

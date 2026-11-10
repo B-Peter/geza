@@ -2,7 +2,7 @@
 // ("Géza · Yes": on this device and as a private Spotify playlist) and
 // becomes the strongest taste signal everywhere; No is never suggested again.
 
-import { type ArtistPick, curate, type Pick, pickArtists } from "./claude.js";
+import { type ArtistPick, curate, type DeckFocus, type Pick, pickArtists } from "./claude.js";
 import type { Enrichment } from "./musicbrainz.js";
 import type { Profile, Track } from "./spotify.js";
 import * as spotify from "./spotify.js";
@@ -58,6 +58,8 @@ export interface Deck {
   asked: number;
   found: number;
   ms: DeckTiming;
+  /** The rest of the deck, still on its way (the deck starts with the first batch). */
+  rest?: Promise<Card[]>;
 }
 
 export interface TrainData {
@@ -67,7 +69,7 @@ export interface TrainData {
   playlistId: string | null;
   /** The private Spotify copy of the no list; null until the first no. */
   noPlaylistId?: string | null;
-  /** The current deck as a public playlist, for the one-tap player. */
+  /** The current deck as a playlist: Spotify plays it as one list. */
   deckPlaylistId?: string | null;
   /** Every swipe with the song's attributes and listening time (newest last). */
   history: Judgement[];
@@ -270,10 +272,19 @@ async function knownFrom(data: TrainData, l: Listening, candidateIds: string[]):
   };
 }
 
+/** Claude is asked in three smaller batches at once: each answers faster than one big one. */
+const BATCHES: { focus: DeckFocus; count: number }[] = [
+  { focus: "close", count: 8 },
+  { focus: "adjacent", count: 7 },
+  { focus: "wildcard", count: 5 },
+];
+/** The deck starts once the first batch gives at least this many cards. */
+const FIRST_CARDS = 3;
+
 /**
- * Ask Claude for artists to discover, fetch their real songs from Spotify,
- * and deal one song per artist. Falls back to song picks when too few
- * artists worked out.
+ * Ask Claude for artists to discover (three batches in parallel), fetch their
+ * real songs from Spotify, and deal one song per artist. The deck is returned
+ * as soon as one batch has given a few cards; the rest follows in `rest`.
  */
 export async function buildDeck(data: TrainData, onProgress: (m: string) => void = () => {}): Promise<Deck> {
   const t0 = performance.now();
@@ -291,41 +302,84 @@ export async function buildDeck(data: TrainData, onProgress: (m: string) => void
     ],
     80,
   );
-  const picks = await pickArtists(
-    {
-      count: ARTISTS_ASKED,
-      loved: [...data.yes.slice(-15), ...listening.topTracks.slice(0, 10)].map(ref),
-      top_artists: listening.topArtists,
-      judged_artists: judged,
-      taste: buildTaste(data.history, { muted: data.muted }),
-    },
-    "low",
-  );
-  const t2 = performance.now();
-  onProgress("Finding their songs on Spotify…");
-  const resolved = await resolveArtists(picks);
-  const known = await knownFrom(
-    data,
-    listening,
-    resolved.flatMap((r) => r.tracks.map((t) => t.id)),
-  );
+  const base = {
+    loved: [...data.yes.slice(-15), ...listening.topTracks.slice(0, 10)].map(ref),
+    top_artists: listening.topArtists,
+    judged_artists: judged,
+    taste: buildTaste(data.history, { muted: data.muted }),
+  };
+  let t2 = 0;
+  const stats = { asked: 0, found: 0 };
+  /** One batch, from Claude's answer to cards (empty on any failure). */
+  const batch = async (focus: DeckFocus, count: number): Promise<Card[]> => {
+    const picks = await pickArtists({ ...base, count, focus }, "low").catch(() => []);
+    t2 ||= performance.now();
+    onProgress("Finding their songs on Spotify…");
+    const resolved = await resolveArtists(picks);
+    stats.asked += picks.length;
+    stats.found += resolved.filter((r) => r.tracks.length > 0).length;
+    const known = await knownFrom(
+      data,
+      listening,
+      resolved.flatMap((r) => r.tracks.map((t) => t.id)),
+    );
+    return deckFromArtists(resolved, data, known);
+  };
+  const batches = BATCHES.map(({ focus, count }) => batch(focus, count));
+
+  // Cards so far, merged in the order batches finish: no song or artist twice,
+  // at most MAX_KNOWN_ARTISTS from familiar artists.
+  const cards: Card[] = [];
+  const merge = (more: Card[]) => {
+    const songs = new Set(cards.map((c) => songKey(c.track.artist, c.track.title)));
+    const artists = new Set(cards.map((c) => firstArtist(c.track.artist)));
+    for (const c of more) {
+      if (cards.length >= DECK_SIZE) break;
+      if (songs.has(songKey(c.track.artist, c.track.title)) || artists.has(firstArtist(c.track.artist)))
+        continue;
+      songs.add(songKey(c.track.artist, c.track.title));
+      artists.add(firstArtist(c.track.artist));
+      cards.push(c);
+    }
+  };
+  const settled = batches.map((p) => p.then(merge));
+  // Wait for the first batch with enough cards (or all of them).
+  await new Promise<void>((resolve) => {
+    let left = settled.length;
+    for (const p of settled)
+      void p.finally(() => {
+        left--;
+        if (cards.length >= FIRST_CARDS || left === 0) resolve();
+      });
+  });
   const at = Date.now();
-  let cards = deckFromArtists(resolved, data, known);
-  const found = resolved.filter((r) => r.tracks.length > 0).length;
-  if (cards.length < MIN_DECK) {
-    onProgress("Claude is picking songs to try…");
-    const more = await buildDeckByTitles(data, listening, known, cards);
-    cards = [...cards, ...more].slice(0, DECK_SIZE);
-  }
-  if (cards.length === 0) throw new Error("None of Claude's picks were found on Spotify. Try again.");
+  const tag = (list: Card[]) => list.map((c) => ({ ...c, deck: at }));
+  const first = tag(cards);
   const t3 = performance.now();
   const ms: DeckTiming = {
     listening: Math.round(t1 - t0),
-    claude: Math.round(t2 - t1),
-    spotify: Math.round(t3 - t2),
+    claude: Math.round((t2 || t3) - t1),
+    spotify: Math.round(t3 - (t2 || t3)),
     total: Math.round(t3 - t0),
   };
-  return { at, cards: cards.map((c) => ({ ...c, deck: at })), asked: picks.length, found, ms };
+  const deck: Deck = { at, cards: first, asked: 0, found: 0, ms };
+  const finish = async (): Promise<Card[]> => {
+    await Promise.all(settled);
+    if (cards.length < MIN_DECK) {
+      const known = await knownFrom(data, listening, []);
+      merge(await buildDeckByTitles(data, listening, known, cards).catch(() => []));
+    }
+    deck.asked = stats.asked;
+    deck.found = stats.found;
+    return tag(cards.slice(first.length));
+  };
+  if (first.length === 0) {
+    const restCards = await finish();
+    if (restCards.length === 0) throw new Error("None of Claude's picks were found on Spotify. Try again.");
+    return { ...deck, cards: restCards, asked: stats.asked, found: stats.found };
+  }
+  deck.rest = finish();
+  return deck;
 }
 
 /** The older route: Claude names songs, Spotify search finds them. */
@@ -358,9 +412,9 @@ async function buildDeckByTitles(data: TrainData, l: Listening, known: Known, ha
 }
 
 /**
- * Put the deck's songs into the "Géza · Deck" playlist (created on first
- * use, public because Spotify's player won't play private playlists, and
- * recreated if you deleted it). Returns the updated data and the playlist.
+ * Put the deck's songs into the private "Géza · Deck" playlist (created on
+ * first use, recreated if you deleted it). Returns the updated data and the
+ * playlist.
  */
 export async function fillDeckPlaylist(
   data: TrainData,
@@ -374,7 +428,6 @@ export async function fillDeckPlaylist(
         me.id,
         DECK_PLAYLIST,
         "The songs of your current Train deck in Géza. Replaced with every new deck.",
-        true,
       )
     ).id;
   };

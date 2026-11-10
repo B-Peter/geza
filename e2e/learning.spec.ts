@@ -40,5 +40,4 @@ test("learning: an older login is asked to reconnect for the new permissions", a
   const scopes = new URL((await auth).url()).searchParams.get("scope")?.split(" ") ?? [];
   expect(scopes).toContain("user-library-read");
   expect(scopes).toContain("user-read-recently-played");
-  expect(scopes).toContain("playlist-modify-public");
 });

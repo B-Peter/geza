@@ -1,13 +1,14 @@
 <script lang="ts">
 import { prefetchDeck, takeDeck } from "../deckCache.js";
-import { type Command, DeckSync, type Playback } from "../deckPlayer.js";
 import { countryName, type Enrichment, enrich } from "../musicbrainz.js";
 import * as spotify from "../spotify.js";
 import { SpotifyError } from "../spotify.js";
 import { app } from "../state.svelte.js";
+import { songKey } from "../text.js";
 import {
   type Card,
   DECK_SIZE,
+  type Deck,
   deckOutcome,
   fillDeckPlaylist,
   judge,
@@ -24,26 +25,19 @@ import BackButton from "../ui/BackButton.svelte";
 import Icon from "../ui/Icon.svelte";
 
 let data = $state<TrainData | null>(null);
-const IN_APP_KEY = "ps.trainInApp";
-/**
- * Play with Spotify's embedded player on the card (the default), not through
- * the Spotify app, which iOS often keeps asleep.
- */
-let inApp = $state(localStorage.getItem(IN_APP_KEY) !== "0");
-/** The embed for the current card is playing. */
-let embedPlaying = $state(false);
-/** The current card's embed didn't start on its own (the browser wants a tap). */
-let tapToPlay = $state(false);
-/** The whole deck in one player (one tap per deck); null = one player per card. */
-let deckPlayer = $state<string | null>(null);
-/** You tapped play in the deck player (iOS needs that one tap). */
-let deckStarted = $state(false);
 let deck = $state<Card[]>([]);
 /** The current deck's id (its "at"), for the Deck done stats. */
 let deckAt = $state(0);
+/**
+ * The deck as the "Géza · Deck" playlist: Spotify plays it as one list, and
+ * when the app is asleep, it opens straight on it (one tap to play there).
+ */
+let deckPlaylist = $state<string | null>(null);
+/** Resolves once the deck playlist is filled (or failed; then plain song lists are used). */
+let deckPlaylistReady: Promise<void> = Promise.resolve();
 let index = $state(0);
 let device = $state<spotify.Device | null>(null);
-/** "spotify": Spotify isn't running; "premium": playback needs Premium. */
+/** "spotify": Spotify isn't running or is asleep; "premium": playback needs Premium. */
 let blocked = $state<"spotify" | "premium" | null>(null);
 let startedIn = $state<number | null>(null);
 /** When the current song started playing (for listening time / dwell). */
@@ -53,6 +47,8 @@ let leaving = $state<Verdict | null>(null);
 let cardEl = $state<HTMLElement | null>(null);
 let sessionYes = $state(0);
 let sessionNo = $state(0);
+/** More cards on their way (the deck starts before Claude has finished). */
+let more = $state(false);
 /** MusicBrainz details per track id, filled in the background. */
 let details = $state<Record<string, Enrichment>>({});
 
@@ -66,7 +62,7 @@ async function enrichDeck(cards: Card[]) {
 }
 
 const card = $derived(deck[index] ?? null);
-const done = $derived(deck.length > 0 && index >= deck.length);
+const done = $derived(deck.length > 0 && index >= deck.length && !more);
 const extra = $derived(card ? details[card.track.id] : undefined);
 /** The album's first release year, when this is a later version. */
 const firstYear = $derived(
@@ -74,15 +70,6 @@ const firstYear = $derived(
 );
 const statusLine = $derived(
   [
-    inApp
-      ? embedPlaying
-        ? "Playing inside Géza"
-        : deckPlayer && !deckStarted
-          ? "Tap ▶ on the player once: the rest of the deck plays by itself"
-          : tapToPlay
-            ? "Tap ▶ on the card to start"
-            : "Starting…"
-      : "",
     startedIn !== null && device ? `Playing on ${device.name} · started in ${startedIn.toFixed(1)} s` : "",
     `${sessionYes} yes · ${sessionNo} no`,
   ]
@@ -97,6 +84,8 @@ const lastDeck = $derived.by(() => {
   return { ...stat, ...deckOutcome(data, stat.at) };
 });
 const skipped = $derived(deck.length - sessionYes - sessionNo);
+/** Opens the Spotify app on the deck (or just the app before the playlist exists). */
+const openDeckHref = $derived(deckPlaylist ? spotify.openUri(deckPlaylist) : "spotify:");
 
 const mmss = (ms: number) =>
   `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
@@ -125,141 +114,6 @@ $effect(() => {
 const DEVICE_KEY = "ps.trainDevice";
 /** Plain words for what went wrong, above Spotify's own reply. */
 let hint = $state("");
-
-const EMBED_ORIGIN = "https://open.spotify.com";
-const embedUrl = (id: string) => `${EMBED_ORIGIN}/embed/track/${encodeURIComponent(id)}?theme=0`;
-const playlistEmbedUrl = (id: string) => `${EMBED_ORIGIN}/embed/playlist/${encodeURIComponent(id)}?theme=0`;
-
-let sync: DeckSync | null = null;
-let lastPlayback: Playback | null = null;
-let stuckTimer: ReturnType<typeof setTimeout> | undefined;
-
-const send = (commands: Command[]) => {
-  for (const c of commands) toEmbed(c);
-};
-
-/** Fill "Géza · Deck" and switch to the one-player mode; on any failure, stay with a player per card. */
-async function setupDeckPlayer(cards: Card[], at: number) {
-  deckPlayer = null;
-  sync = null;
-  lastPlayback = null;
-  if (!data) return;
-  try {
-    const filled = await fillDeckPlaylist(
-      $state.snapshot(data) as TrainData,
-      cards.map((c) => c.track.uri),
-      app.profile,
-    );
-    if (deckAt !== at || !inApp) return;
-    data = filled.data;
-    sync = new DeckSync((i) => {
-      const c = deck[i];
-      return c ? Math.round(startPosition(c.track) / 1000) : 0;
-    });
-    sync.wanted = index;
-    deckStarted = false;
-    embedPlaying = false;
-    tapToPlay = false;
-    deckPlayer = filled.playlistId;
-  } catch {
-    // Missing permission (log in again) or Spotify refused: one player per card still works.
-  }
-}
-
-/** Skipping doesn't move the player (autoplay blocked after all): back to one player per card. */
-function watchSkip() {
-  clearTimeout(stuckTimer);
-  stuckTimer = setTimeout(() => {
-    if (sync?.stuck()) {
-      deckPlayer = null;
-      sync = null;
-      app.notify("Skipping in the deck player didn't work here, so each card gets its own player again.");
-    }
-  }, 4500);
-}
-
-// --- The embedded player -----------------------------------------------------
-// Spotify's embed speaks a small postMessage protocol (the one its iFrame API
-// uses): it says {type:"ready"}, takes {command:"play"} and {command:"seek"},
-// and reports {type:"playback_update", payload:{isPaused, position, duration}}.
-let embedEl = $state<HTMLIFrameElement | null>(null);
-/** Seeked to the catchy part already (full songs only, not 30-second previews). */
-let embedSeeked = false;
-let tapTimer: ReturnType<typeof setTimeout> | undefined;
-
-const toEmbed = (message: Record<string, unknown>) =>
-  embedEl?.contentWindow?.postMessage(message, EMBED_ORIGIN);
-
-$effect(() => {
-  const onMessage = (e: MessageEvent) => {
-    if (e.origin !== EMBED_ORIGIN || !embedEl || e.source !== embedEl.contentWindow) return;
-    const data = e.data as { type?: string; payload?: { isPaused?: boolean; duration?: number } } | null;
-    if (data?.type === "playback_update" && sync) {
-      const p = (data.payload ?? {}) as Playback;
-      lastPlayback = p;
-      embedPlaying = p.isPaused === false;
-      if (embedPlaying) {
-        tapToPlay = false;
-        playingSince ??= Date.now();
-      }
-      const before = sync.playerIndex;
-      send(sync.update(p));
-      deckStarted = sync.started;
-      if (sync.playerIndex !== before) playingSince = Date.now();
-      return;
-    }
-    if (data?.type === "ready") {
-      toEmbed({ command: "load_complete_ack" });
-      toEmbed({ command: "play" });
-      clearTimeout(tapTimer);
-      // Still silent after a moment: the browser wants a tap on the player.
-      tapTimer = setTimeout(() => {
-        if (!embedPlaying) tapToPlay = true;
-      }, 2500);
-    }
-    if (data?.type === "playback_update" || data?.type === "playback_started") {
-      const p = data.payload ?? {};
-      embedPlaying = p.isPaused === false || data.type === "playback_started";
-      if (embedPlaying) {
-        tapToPlay = false;
-        playingSince ??= Date.now();
-      }
-      // Full songs start at their catchy part; 30-second previews from the top.
-      const current = deck[index];
-      if (embedPlaying && !embedSeeked && current && (p.duration ?? 0) > 60_000) {
-        embedSeeked = true;
-        toEmbed({ command: "seek", timestamp: Math.round(startPosition(current.track) / 1000) });
-      }
-    }
-  };
-  addEventListener("message", onMessage);
-  return () => {
-    removeEventListener("message", onMessage);
-    clearTimeout(tapTimer);
-  };
-});
-
-/** A new card's embed is loading: reset its state. */
-function embedFor(_id: string) {
-  embedPlaying = false;
-  tapToPlay = false;
-  embedSeeked = false;
-  clearTimeout(tapTimer);
-}
-
-function chooseInApp() {
-  inApp = true;
-  localStorage.setItem(IN_APP_KEY, "1");
-  if (device) void spotify.pause(device.id).catch(() => {});
-  device = null;
-  choosing = false;
-  blocked = null;
-  noSound = false;
-  playingSince = null;
-  const current = deck[index];
-  if (current) embedFor(current.track.id);
-  if (deck.length && !done) void setupDeckPlayer($state.snapshot(deck) as Card[], deckAt);
-}
 /** All Spotify devices, for the picker. */
 let devices = $state<spotify.Device[]>([]);
 /** The picker is open (no remembered device, or you tapped Change). */
@@ -275,25 +129,21 @@ async function loadDevices(): Promise<void> {
  * Use the device you picked before if Spotify still lists it; with exactly
  * one usable device, use that; otherwise open the picker.
  */
-async function findDevice(): Promise<boolean> {
-  if (inApp) {
-    playingSince = Date.now();
-    return false;
-  }
+async function findDevice(preferActive = false): Promise<boolean> {
   await loadDevices();
   const usable = devices.filter((d) => !d.is_restricted);
   const saved = localStorage.getItem(DEVICE_KEY);
-  device = usable.find((d) => d.id === saved) ?? (usable.length === 1 ? (usable[0] ?? null) : null);
+  device =
+    usable.find((d) => d.id === saved) ??
+    // Back from Spotify: whatever you just pressed play on wins.
+    (preferActive ? usable.find((d) => d.is_active) : undefined) ??
+    (usable.length === 1 ? (usable[0] ?? null) : null);
   blocked = devices.length === 0 ? "spotify" : null;
   choosing = devices.length > 0 && !device;
   return Boolean(device);
 }
 
 function choose(d: spotify.Device) {
-  deckPlayer = null;
-  sync = null;
-  inApp = false;
-  localStorage.setItem(IN_APP_KEY, "0");
   device = d;
   localStorage.setItem(DEVICE_KEY, d.id);
   choosing = false;
@@ -330,36 +180,31 @@ let noSound = $state(false);
 /** Play the deck from card i; measure how long until Spotify plays it. */
 async function playFrom(i: number) {
   const current = deck[i];
-  if (!current) return;
-  if (inApp) {
-    // The embedded player on the card does the playing (see the embed section).
-    playingSince = null;
-    embedFor(current.track.id);
-    return;
-  }
-  if (!device) return;
+  if (!current || !device) return;
   const token = ++playToken;
   startedIn = null;
   playingSince = null;
   noSound = false;
   hint = "";
   const t0 = performance.now();
+  await deckPlaylistReady;
+  if (token !== playToken) return;
   try {
-    await spotify.playList(
-      device.id,
-      deck.slice(i).map((c) => c.track.uri),
-      startPosition(current.track),
-    );
+    if (deckPlaylist) {
+      await spotify.playInPlaylist(device.id, deckPlaylist, i, startPosition(current.track));
+    } else {
+      await spotify.playList(
+        device.id,
+        deck.slice(i).map((c) => c.track.uri),
+        startPosition(current.track),
+      );
+    }
     lastReply = "Spotify accepted the play command.";
   } catch (e) {
     lastReply = e instanceof Error ? e.message : String(e);
-    if (spotify.unreachable(e)) {
-      hint = `Spotify's servers couldn't reach the Spotify app on “${device.name}”: iOS put it to sleep in the background. Open Spotify, play anything for a second, come back and try again. Or play inside Géza instead.`;
-    }
-    if (e instanceof SpotifyError && e.status === 404) {
-      // The device dropped off (asleep or closed): let you pick again.
-      await changeDevice();
-      noSound = devices.length > 0;
+    if (spotify.unreachable(e) || (e instanceof SpotifyError && e.status === 404)) {
+      // The Spotify app is asleep (iOS suspends it) or gone: open it on the deck.
+      blocked = "spotify";
       return;
     }
     if (e instanceof SpotifyError && e.status === 403 && /premium/i.test(e.message)) {
@@ -401,6 +246,57 @@ async function wakeAndPlay(i: number) {
   await playFrom(i);
 }
 
+/** Put the deck into "Géza · Deck"; if that fails, Spotify gets plain song lists. */
+function prepareDeckPlaylist(cards: Card[]) {
+  deckPlaylist = null;
+  if (!data) return;
+  const snapshot = $state.snapshot(data) as TrainData;
+  deckPlaylistReady = fillDeckPlaylist(
+    snapshot,
+    cards.map((c) => c.track.uri),
+    app.profile,
+  )
+    .then((filled) => {
+      data = { ...(data ?? filled.data), deckPlaylistId: filled.playlistId };
+      deckPlaylist = filled.playlistId;
+    })
+    .catch(() => {});
+}
+
+/** The rest of the deck arrived: add it to the cards and to the playlist, in order. */
+function addRest(built: Deck, at: number) {
+  more = true;
+  void built.rest
+    ?.then(async (extraCards) => {
+      if (deckAt !== at) return;
+      const have = new Set(deck.map((c) => songKey(c.track.artist, c.track.title)));
+      const fresh = extraCards.filter((c) => !have.has(songKey(c.track.artist, c.track.title)));
+      const room = Math.max(0, DECK_SIZE - deck.length);
+      const added = fresh.slice(0, room);
+      if (!added.length) return;
+      await deckPlaylistReady;
+      if (deckPlaylist) {
+        await spotify
+          .addToPlaylist(
+            deckPlaylist,
+            added.map((c) => c.track.uri),
+          )
+          .catch(() => {});
+      }
+      deck = [...deck, ...added];
+      void enrichDeck(added);
+    })
+    .catch(() => {})
+    .finally(async () => {
+      if (deckAt !== at) return;
+      more = false;
+      if (data) data = await recordDeck($state.snapshot(data) as TrainData, { ...built, cards: deck });
+      // Swiped past the last card while the rest was on its way.
+      if (index >= deck.length && device) void spotify.pause(device.id).catch(() => {});
+      else if (index < deck.length && !playingSince && device && !blocked) void playFrom(index);
+    });
+}
+
 async function start() {
   if (!data) return;
   const current = $state.snapshot(data) as TrainData;
@@ -408,20 +304,18 @@ async function start() {
   if (!built) return;
   deck = built.cards;
   deckAt = built.at;
-  if (inApp) void setupDeckPlayer(built.cards, built.at);
-  data = await recordDeck(current, built);
+  prepareDeckPlaylist(built.cards);
   void enrichDeck(built.cards);
   index = 0;
   sessionYes = 0;
   sessionNo = 0;
+  if (built.rest) addRest(built, built.at);
+  else data = await recordDeck(current, built);
   if (await findDevice()) void wakeAndPlay(0);
 }
 
 async function retrySpotify() {
-  if (device) {
-    await loadDevices();
-    void wakeAndPlay(index);
-  } else if (await findDevice()) void wakeAndPlay(index);
+  if (await findDevice(true)) void playFrom(index);
 }
 
 // Coming back from the Spotify app: try again on its own.
@@ -444,15 +338,14 @@ function decide(verdict: Verdict) {
   if (verdict === "no") sessionNo++;
   // Start the next song right away; the card animation covers the wait.
   const next = index + 1;
-  if (sync && deckPlayer) {
-    send(sync.goTo(next));
-    watchSkip();
+  if (next < deck.length) void playFrom(next);
+  else if (device) {
     playingSince = null;
-  } else if (next < deck.length) void playFrom(next);
-  else if (device) void spotify.pause(device.id).catch(() => {});
+    void spotify.pause(device.id).catch(() => {});
+  }
   const extra = $state.snapshot(details[judged.track.id] ?? { genres: [] }) as Enrichment;
   void judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell, extra).then((d) => {
-    data = d;
+    data = { ...d, deckPlaylistId: data?.deckPlaylistId ?? d.deckPlaylistId };
     // Near the end of a deck, prepare the next one with your latest swipes.
     if (next === deck.length - 5) prefetchDeck(d);
   });
@@ -526,10 +419,6 @@ $effect(() => {
           </li>
         {/each}
       </ul>
-      <button class="device inapp" class:current={inApp} onclick={chooseInApp}>
-        <span class="device-name">Inside Géza</span>
-        <span class="small muted">Spotify's mini player on each card; no Spotify app needed. You tap ▶ on the card.</span>
-      </button>
       <p class="small muted">Not listed? Open Spotify on that device and play anything for a second.</p>
       <div class="two">
         <a class="btn secondary small" href="spotify:">Open Spotify</a>
@@ -544,34 +433,20 @@ $effect(() => {
         <span class="phone"><span class="dot"></span></span>
         <span class="eq"><span></span><span></span><span></span><span></span></span>
       </div>
-      <div class="notice-title">Wake up Spotify</div>
+      <div class="notice-title">Start the deck in Spotify</div>
       <p class="small muted">
-        Géza plays the deck through your Spotify app, but it isn't running right now. Open it, start any song, then come
-        back. You won't need to switch again.
+        Your Spotify app is asleep, so Géza can't start it from here. Tap below, press play in Spotify once, then come
+        back: Spotify stays awake while it plays, and every swipe moves it to the next song.
       </p>
       <div class="two">
-        <a class="btn secondary small" href="spotify:">Open Spotify</a>
-        <button class="btn secondary small" onclick={chooseInApp}>Play inside Géza</button>
-        <button class="btn small" onclick={retrySpotify}>I'm back</button>
+        <a class="btn small" href={openDeckHref}>Open the deck in Spotify</a>
+        <button class="btn secondary small" onclick={retrySpotify}>I'm back</button>
       </div>
     </div>
   {:else if blocked === "premium"}
     <div class="card notice" role="status">
       <div class="notice-title">Spotify Premium needed</div>
       <p class="small muted">Spotify only lets apps start songs on Premium accounts.</p>
-    </div>
-  {/if}
-
-  {#if deckPlayer && inApp && !done && !choosing}
-    <div class="deck-player">
-      <iframe
-        class="embed"
-        title="Deck player"
-        src={playlistEmbedUrl(deckPlayer)}
-        allow="encrypted-media; autoplay; clipboard-write"
-        loading="eager"
-        bind:this={embedEl}
-      ></iframe>
     </div>
   {/if}
 
@@ -591,29 +466,16 @@ $effect(() => {
         onpointerup={up}
         onpointercancel={up}
       >
-        <div class="art" class:embedded={inApp && !deckPlayer}>
-          {#if inApp && !deckPlayer}
-            {#key card.track.id}
-              <iframe
-                class="embed"
-                title={`Play ${card.track.title} by ${card.track.artist}`}
-                src={embedUrl(card.track.id)}
-                allow="encrypted-media; autoplay; clipboard-write"
-                loading="eager"
-                bind:this={embedEl}
-              ></iframe>
-            {/key}
-          {:else if card.track.image}
+        <div class="art">
+          {#if card.track.image}
             <img src={card.track.image} alt="" draggable="false" />
           {:else}
             <div class="placeholder" aria-hidden="true"><Icon name="mixes" size={48} /></div>
           {/if}
-          {#if !inApp || deckPlayer}
-            <div class="playing small">
-              <span class="mini-eq" aria-hidden="true"><span></span><span></span><span></span></span>
-              {deckPlayer ? "Deck player" : "In Spotify"} · from {mmss(startPosition(card.track))}{#if playingSince} · listening {mmss(listened * 1000)}{/if}
-            </div>
-          {/if}
+          <div class="playing small">
+            <span class="mini-eq" aria-hidden="true"><span></span><span></span><span></span></span>
+            In Spotify · from {mmss(startPosition(card.track))}{#if playingSince} · listening {mmss(listened * 1000)}{/if}
+          </div>
         </div>
         <div class="info">
           <div class="title-row">
@@ -681,16 +543,20 @@ $effect(() => {
         {#if lastReply}<p class="reply small">Spotify said: {lastReply}</p>{/if}
         <div class="two">
           <button class="btn secondary small" onclick={changeDevice}>Change device</button>
-          <a class="btn secondary small" href="spotify:">Open Spotify</a>
-          <button class="btn secondary small" onclick={chooseInApp}>Play inside Géza</button>
+          <a class="btn secondary small" href={openDeckHref}>Open the deck in Spotify</a>
           <button class="btn small" onclick={retrySpotify}>Try again</button>
         </div>
       </div>
     {/if}
-    {#if (device || inApp) && !choosing}
-      <button class="device-chip small" onclick={changeDevice}>Play on: {inApp ? "inside Géza" : device?.name} · Change</button>
+    {#if device && !choosing}
+      <button class="device-chip small" onclick={changeDevice}>Play on: {device.name} · Change</button>
     {/if}
     <p class="status small muted" aria-live="polite">{statusLine}</p>
+  {:else if more && deck.length > 0 && index >= deck.length}
+    <div class="card notice center" role="status">
+      <div class="notice-title">More songs on the way…</div>
+      <p class="small muted">Claude is still picking the rest of this deck.</p>
+    </div>
   {:else if done}
     <div class="card notice center">
       <div class="notice-title big">Deck done</div>
@@ -739,7 +605,7 @@ $effect(() => {
   {/if}
 </main>
 
-{#if !card && !done && !blocked}
+{#if !card && !done && !blocked && !more}
   <div class="actions">
     <button class="btn" onclick={start} disabled={!data || !!app.busy}>Start a deck</button>
   </div>
@@ -802,10 +668,6 @@ $effect(() => {
   .fly-later { transform: translateY(-120%) !important; opacity: 0; }
   .art { position: relative; aspect-ratio: 7 / 5; background: var(--line); }
   .art img { display: block; width: 100%; height: 100%; object-fit: cover; }
-  .art.embedded { aspect-ratio: auto; height: 152px; background: var(--ink); }
-  .embed { display: block; width: 100%; height: 152px; border: 0; }
-  .deck-player { margin-top: 12px; border-radius: 16px; overflow: hidden; background: var(--ink); }
-  .device.inapp { border-style: dashed; }
   .hint { margin: 0 0 4px; font-weight: 600; }
   .placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
   .playing {

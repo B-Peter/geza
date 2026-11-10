@@ -30,8 +30,8 @@ const first = $derived(app.mixes[0]);
     <div class="card reconnect" role="status">
       <div class="reconnect-title">Reconnect Spotify</div>
       <p class="small muted">
-        Géza needs a new Spotify permission: it can now learn from what you heart and play, and Train can play a
-        whole deck with one tap (from a public “Géza · Deck” playlist). Spotify needs you to confirm that once.
+        Géza needs a new Spotify permission: it can now learn from what you heart and play. Spotify needs you to
+        confirm that once.
       </p>
       <button class="btn small" onclick={() => spotify.startLogin().catch((e) => app.notify(e))}>Reconnect Spotify</button>
     </div>

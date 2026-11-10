@@ -80,9 +80,12 @@ export const library = {
   playlists: [] as { id: string; name: string; tracks: unknown[] }[],
   /** Refuse public playlists (a login without playlist-modify-public). */
   noPublic: false,
+  /** What Géza wrote into each playlist (by id), as track URIs. */
+  contents: {} as Record<string, string[]>,
   reset() {
     this.playlists = [];
     this.noPublic = false;
+    this.contents = {};
   },
 };
 
@@ -97,7 +100,7 @@ export const player = {
   /** The device the last play went to. */
   on: null as string | null,
   playing: null as string | null,
-  plays: [] as { uris: string[]; position_ms: number; device: string | null }[],
+  plays: [] as { uris: string[]; position_ms: number; device: string | null; context?: string | null }[],
   transfers: [] as string[],
   reset() {
     this.devices = true;
@@ -179,6 +182,10 @@ export async function mockApis(page: Page): Promise<void> {
         const own = library.playlists.find((p) => p.id === items[1]);
         return json({ items: (own?.tracks ?? PLAYLIST_TRACKS).map((t) => ({ item: t })), next: null });
       }
+      const body = route.request().postDataJSON() as { uris?: string[] };
+      const id = items[1] ?? "";
+      const put = route.request().method() === "PUT";
+      library.contents[id] = [...(put ? [] : (library.contents[id] ?? [])), ...(body.uris ?? [])];
       return json({ snapshot_id: "s1" });
     }
     if (path === "/me/player/devices") {
@@ -198,9 +205,24 @@ export async function mockApis(page: Page): Promise<void> {
       if (player.reject && (player.reject.times === undefined || player.reject.times-- > 0))
         return json({ error: { message: player.reject.message } }, player.reject.status);
       player.on = url.searchParams.get("device_id");
-      const body = route.request().postDataJSON() as { uris: string[]; position_ms: number };
-      player.plays.push({ ...body, device: url.searchParams.get("device_id") });
-      if (!player.silent) player.playing = body.uris[0]?.split(":").pop() ?? null;
+      const body = route.request().postDataJSON() as {
+        uris?: string[];
+        context_uri?: string;
+        offset?: { position: number };
+        position_ms: number;
+      };
+      // A playlist plays from its song at offset.position on.
+      const fromContext = body.context_uri
+        ? (library.contents[body.context_uri.split(":").pop() ?? ""] ?? []).slice(body.offset?.position ?? 0)
+        : null;
+      const uris = fromContext ?? body.uris ?? [];
+      player.plays.push({
+        uris,
+        position_ms: body.position_ms,
+        device: url.searchParams.get("device_id"),
+        context: body.context_uri ?? null,
+      });
+      if (!player.silent) player.playing = uris[0]?.split(":").pop() ?? null;
       return route.fulfill({ status: 204, headers: CORS });
     }
     if (path === "/me/player/pause") {
@@ -254,7 +276,10 @@ export async function mockApis(page: Page): Promise<void> {
       });
     }
     // A deck request asks for artists; everything else asks for songs.
-    const deck = (route.request().postData() ?? "").includes("judged_artists");
+    const post = route.request().postData() ?? "";
+    const deck = post.includes("judged_artists");
+    // Decks ask in three batches; the "close" one names the test artists, the others none.
+    const artists = /focus.{0,6}close/.test(post) ? CLAUDE_ARTISTS : { artists: [] };
     return route.fulfill({
       contentType: "application/json",
       headers: CORS,
@@ -264,7 +289,7 @@ export async function mockApis(page: Page): Promise<void> {
         role: "assistant",
         model: "claude-haiku-5-5",
         stop_reason: "end_turn",
-        content: [{ type: "text", text: JSON.stringify(deck ? CLAUDE_ARTISTS : CLAUDE_PICKS) }],
+        content: [{ type: "text", text: JSON.stringify(deck ? artists : CLAUDE_PICKS) }],
         usage: { input_tokens: 1, output_tokens: 1 },
       }),
     });
@@ -356,7 +381,7 @@ export interface SeedOptions {
 }
 
 export const ALL_SCOPES =
-  "user-read-private user-top-read playlist-read-private playlist-modify-private playlist-modify-public user-library-read user-read-recently-played user-read-playback-state user-modify-playback-state";
+  "user-read-private user-top-read playlist-read-private playlist-modify-private user-library-read user-read-recently-played user-read-playback-state user-modify-playback-state";
 
 /** Put the app into a state by writing straight to its storage (dev server only). */
 export async function seed(page: Page, opts: SeedOptions): Promise<void> {

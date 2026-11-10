@@ -56,8 +56,6 @@ const SCREENS: Screen[] = [
         { id: "phone1", name: "Peter's iPhone", type: "Smartphone", is_active: false },
       ];
       await p.getByRole("button", { name: "Start a deck" }).click();
-      // The embedded player is the default; the picker opens from the chip.
-      await p.getByRole("button", { name: "Play on: inside Géza · Change" }).click();
       await p.getByRole("region", { name: "Where should Train play?" }).waitFor();
     },
   },

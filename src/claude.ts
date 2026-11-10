@@ -241,9 +241,11 @@ Rules:
 - Most of them (at least 80%) must be NEW to the listener: not in
   "top_artists", not in "judged_artists", not the artists of "loved".
   Up to 20% may be familiar artists, for which you ask for a "deep cut".
-- Spread: about 55% close to their taste (same scenes as what they love),
-  30% adjacent (neighbouring genres, other eras, other countries or
-  languages in the same spirit), 15% bold wildcards that could still land.
+- "focus" says which kind of artists this answer is for (other answers
+  cover the rest): "close" = the same scenes as what they love; "adjacent"
+  = neighbouring genres, other eras, other countries or languages in the
+  same spirit; "wildcard" = bold picks from further away that could still
+  land.
 - Vary eras and countries. Prefer artists with a loyal following over
   chart acts, unless "taste.popularity" is "well-known".
 - "taste" summarises their swipes: favour liked_tags, liked_eras,
@@ -264,8 +266,11 @@ export interface ArtistPick {
   tags: string[];
 }
 
+export type DeckFocus = "close" | "adjacent" | "wildcard";
+
 export interface DeckInput {
   count: number;
+  focus: DeckFocus;
   loved: SongRef[];
   top_artists: string[];
   /** Artists already judged in Train (any verdict), so decks don't repeat. */

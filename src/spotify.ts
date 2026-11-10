@@ -18,7 +18,6 @@ export const REQUIRED_SCOPES = [
   "user-top-read", // top tracks and artists as taste signals
   "playlist-read-private", // read the mix playlists (they are private)
   "playlist-modify-private", // create and update them
-  "playlist-modify-public", // Train: Spotify's player only plays public playlists ("Géza · Deck")
   "user-library-read", // which songs in the mixes you've hearted
   "user-read-recently-played", // which songs in the mixes you've played
   "user-read-playback-state", // Train: find your Spotify app and check what's playing
@@ -649,8 +648,20 @@ export const unreachable = (e: unknown): boolean =>
  * buffers the next item in a list ahead of time, so the following swipe can
  * start quickly. One request does both the jump and the seek.
  */
-export async function playList(deviceId: string, uris: string[], positionMs: number): Promise<void> {
-  const body = { uris, offset: { position: 0 }, position_ms: Math.max(0, Math.round(positionMs)) };
+export function playList(deviceId: string, uris: string[], positionMs: number): Promise<void> {
+  return play(deviceId, { uris, offset: { position: 0 }, position_ms: Math.max(0, Math.round(positionMs)) });
+}
+
+/** Play a playlist from its song at `position` (0-based), `positionMs` into it. */
+export function playInPlaylist(deviceId: string, playlistId: string, position: number, positionMs: number) {
+  return play(deviceId, {
+    context_uri: `spotify:playlist:${playlistId}`,
+    offset: { position },
+    position_ms: Math.max(0, Math.round(positionMs)),
+  });
+}
+
+async function play(deviceId: string, body: Record<string, unknown>): Promise<void> {
   const path = `/me/player/play?device_id=${encodeURIComponent(deviceId)}`;
   for (let attempt = 0; ; attempt++) {
     try {

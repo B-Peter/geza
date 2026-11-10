@@ -29,7 +29,7 @@ if (!framed()) {
   void requestPersistence();
   void app.init().then(() => {
     const news = updateMessage(__APP_VERSION__);
-    if (news) app.notify(news, "ok", 9000);
+    if (news) app.notify(news, "ok", 3000);
   });
   const target = document.getElementById("app");
   if (target) mount(App, { target });
