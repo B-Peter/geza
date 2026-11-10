@@ -59,6 +59,15 @@ const first = $derived(app.mixes[0]);
     </p>
   {/if}
 
+  <a class="card row random" href="#/train">
+    <span class="ico"><Icon name="check" size={20} /></span>
+    <span class="grow">
+      <span class="title">Train Géza</span>
+      <span class="small muted">Swipe songs to teach it your taste</span>
+    </span>
+    <Icon name="arrow" size={20} />
+  </a>
+
   <a class="card row random" href="#/random">
     <span class="ico"><Icon name="sparkle" size={20} /></span>
     <span class="grow">

@@ -23,6 +23,7 @@ import {
   swapCounts,
   unblock,
 } from "./swap.js";
+import { loadTrain, trainSignals } from "./train.js";
 
 const ref = (t: { artist: string; title: string }) => ({ artist: t.artist, title: t.title });
 
@@ -51,19 +52,7 @@ export async function ensurePlaylists(
 }
 
 /** Look up each pick on Spotify, four at a time (gentle on rate limits). */
-export async function resolveAll(picks: Pick[]): Promise<Resolved[]> {
-  const out: Resolved[] = new Array(picks.length);
-  let next = 0;
-  const worker = async () => {
-    while (next < picks.length) {
-      const i = next++;
-      const pick = picks[i];
-      if (pick) out[i] = { pick, track: await spotify.findTrack(pick.artist, pick.title) };
-    }
-  };
-  await Promise.all([worker(), worker(), worker(), worker()]);
-  return out;
-}
+const resolveAll = (picks: Pick[]): Promise<Resolved[]> => spotify.findAll(picks);
 
 function uniqueRefs(tracks: Track[], max: number) {
   const seen = new Set<string>();
@@ -90,14 +79,16 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
   onProgress("Reading your listening…");
   const [topTracks, topArtists] = await Promise.all([spotify.getTopTracks(20), spotify.getTopArtists(20)]);
 
+  const trained = trainSignals(await loadTrain());
   const input: CurateInput = {
     mix: mix.name,
     mode: mix.mode === "renew" ? "renew" : "tweak",
     remove_count: counts.remove,
     add_count: counts.add,
     tune: mix.tune,
-    loved: uniqueRefs([...mix.locked, ...topTracks], 25),
-    blocked: mix.blocked,
+    // Train "yes" songs first: the most explicit taste signal there is.
+    loved: [...trained.loved, ...uniqueRefs([...mix.locked, ...topTracks], 25)].slice(0, 40),
+    blocked: [...mix.blocked, ...trained.blocked],
     locked: mix.locked.map(ref),
     current: current.map(ref),
     top_artists: topArtists,

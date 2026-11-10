@@ -2,12 +2,12 @@
 // graph, separate from the four weekly mixes.
 
 import { curate, type Tune } from "./claude.js";
-import { resolveAll } from "./prepare.js";
 import { PRESETS } from "./radar.js";
 import type { Profile, Track } from "./spotify.js";
 import * as spotify from "./spotify.js";
 import * as store from "./store.js";
 import { filterAdditions } from "./swap.js";
+import { loadTrain, trainSignals } from "./train.js";
 
 export const RANDOM_PLAYLIST = "Studio Random";
 export const RANDOM_SIZE = 20;
@@ -62,6 +62,7 @@ export async function prepareRandom(
   onProgress("Reading your listening…");
   const [topTracks, topArtists] = await Promise.all([spotify.getTopTracks(20), spotify.getTopArtists(20)]);
 
+  const trained = trainSignals(await loadTrain());
   onProgress("Claude is picking songs…");
   const picks = await curate({
     mix: "Random, for right now",
@@ -69,8 +70,8 @@ export async function prepareRandom(
     remove_count: 0,
     add_count: RANDOM_SIZE,
     tune: settings.tune,
-    loved: topTracks.map(ref),
-    blocked: [],
+    loved: [...trained.loved, ...topTracks.map(ref)].slice(0, 40),
+    blocked: trained.blocked,
     locked: [],
     current: [],
     top_artists: topArtists,
@@ -78,7 +79,7 @@ export async function prepareRandom(
   });
 
   onProgress("Finding the songs on Spotify…");
-  const { add } = filterAdditions(await resolveAll(picks.add), [], [], [], RANDOM_SIZE);
+  const { add } = filterAdditions(await spotify.findAll(picks.add), [], [], [], RANDOM_SIZE);
   if (add.length === 0) throw new Error("None of Claude's picks were found on Spotify. Try again.");
   const uris = add.map((a) => (a.track as Track).uri);
 

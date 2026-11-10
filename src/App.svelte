@@ -6,6 +6,7 @@ import Random from "./screens/Random.svelte";
 import Review from "./screens/Review.svelte";
 import Settings from "./screens/Settings.svelte";
 import Setup from "./screens/Setup.svelte";
+import Train from "./screens/Train.svelte";
 import Welcome from "./screens/Welcome.svelte";
 import { app } from "./state.svelte.js";
 import Loader from "./ui/Loader.svelte";
@@ -23,6 +24,8 @@ import Loader from "./ui/Loader.svelte";
   <MixDetail id={app.route.id} />
 {:else if app.route.name === "review"}
   <Review id={app.route.id} />
+{:else if app.route.name === "train"}
+  <Train />
 {:else if app.route.name === "random"}
   <Random />
 {:else if app.route.name === "settings"}

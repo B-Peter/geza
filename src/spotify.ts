@@ -20,6 +20,8 @@ export const REQUIRED_SCOPES = [
   "playlist-modify-private", // create and update them
   "user-library-read", // which songs in the mixes you've hearted
   "user-read-recently-played", // which songs in the mixes you've played
+  "user-read-playback-state", // Train: find your Spotify app and check what's playing
+  "user-modify-playback-state", // Train: play each song in your Spotify app
 ];
 const SCOPES = REQUIRED_SCOPES.join(" ");
 
@@ -34,6 +36,10 @@ export interface Track {
   uri: string;
   artist: string;
   title: string;
+  /** Present on tracks fetched since Train was added. */
+  durationMs?: number;
+  /** Album cover, a medium-size image on i.scdn.co. */
+  image?: string;
 }
 
 interface Tokens {
@@ -57,6 +63,8 @@ interface SpotifyTrack {
   name: string;
   type?: string;
   artists: { name: string }[];
+  duration_ms?: number;
+  album?: { images?: { url: string; width?: number | null }[] };
 }
 
 export interface Profile {
@@ -341,11 +349,20 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   }
 }
 
+function cover(t: SpotifyTrack): string | undefined {
+  const images = t.album?.images ?? [];
+  // Spotify lists sizes large to small; take the first one at most 300 px wide.
+  const url = (images.find((i) => (i.width ?? 0) <= 300) ?? images[images.length - 1])?.url;
+  return url?.startsWith("https://i.scdn.co/") ? url : undefined;
+}
+
 const toTrack = (t: SpotifyTrack): Track => ({
   id: t.id,
   uri: t.uri,
   artist: t.artists.map((a) => a.name).join(", "),
   title: t.name,
+  ...(t.duration_ms ? { durationMs: t.duration_ms } : {}),
+  ...(cover(t) ? { image: cover(t) } : {}),
 });
 
 export function getProfile(): Promise<Profile> {
@@ -488,4 +505,69 @@ export async function likedAmong(ids: string[]): Promise<Set<string>> {
     });
   }
   return liked;
+}
+
+// --- Playback in your Spotify app (Train) ---------------------------------
+
+export interface Device {
+  id: string;
+  name: string;
+  type: string;
+  is_active: boolean;
+}
+
+export async function getDevices(): Promise<Device[]> {
+  const json = await api<{ devices: Device[] }>("/me/player/devices");
+  return json.devices.filter((d) => d.id);
+}
+
+/** The phone's Spotify app if it's running, else whatever is active. */
+export function pickDevice(devices: Device[]): Device | null {
+  return (
+    devices.find((d) => d.is_active) ??
+    devices.find((d) => d.type.toLowerCase() === "smartphone") ??
+    devices[0] ??
+    null
+  );
+}
+
+/**
+ * Play `uris` as one list, starting with the first at `positionMs`. Spotify
+ * buffers the next item in a list ahead of time, so the following swipe can
+ * start quickly. One request does both the jump and the seek.
+ */
+export async function playList(deviceId: string, uris: string[], positionMs: number): Promise<void> {
+  await api(`/me/player/play?device_id=${encodeURIComponent(deviceId)}`, {
+    method: "PUT",
+    body: { uris, offset: { position: 0 }, position_ms: Math.max(0, Math.round(positionMs)) },
+  });
+}
+
+export async function pause(deviceId: string): Promise<void> {
+  await api(`/me/player/pause?device_id=${encodeURIComponent(deviceId)}`, { method: "PUT" });
+}
+
+/** The track Spotify is playing right now, or null. */
+export async function nowPlaying(): Promise<{ trackId: string; isPlaying: boolean } | null> {
+  const json = await api<{ is_playing?: boolean; item?: { id?: string } | null } | null>(
+    "/me/player/currently-playing",
+  );
+  return json?.item?.id ? { trackId: json.item.id, isPlaying: Boolean(json.is_playing) } : null;
+}
+
+/** Look up each pick on Spotify, four at a time (gentle on rate limits). */
+export async function findAll<P extends { artist: string; title: string }>(
+  picks: P[],
+): Promise<{ pick: P; track: Track | null }[]> {
+  const out: { pick: P; track: Track | null }[] = new Array(picks.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < picks.length) {
+      const i = next++;
+      const pick = picks[i];
+      if (pick) out[i] = { pick, track: await findTrack(pick.artist, pick.title) };
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  return out;
 }

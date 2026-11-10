@@ -11,7 +11,8 @@ const CSP = [
   "script-src 'self'",
   "style-src 'self'",
   "font-src 'self'",
-  "img-src 'self'",
+  // Album covers come from Spotify's image CDN (images only).
+  "img-src 'self' https://i.scdn.co",
   "connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://api.anthropic.com",
   "worker-src 'self'",
   "manifest-src 'self'",

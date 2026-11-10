@@ -1,0 +1,127 @@
+// Train: swipe through songs Claude suggests. Yes goes to the shadow list
+// ("Géza · Yes": on this device and as a private Spotify playlist) and
+// becomes the strongest taste signal everywhere; No is never suggested again.
+
+import { curate, type Pick } from "./claude.js";
+import type { Profile, Track } from "./spotify.js";
+import * as spotify from "./spotify.js";
+import * as store from "./store.js";
+import { songKey } from "./text.js";
+
+export const DECK_SIZE = 15;
+export const YES_PLAYLIST = "Géza · Yes";
+/** Where each song starts: past most intros, near the first chorus. */
+export const START_AT = 0.35;
+const DEFAULT_START_MS = 45_000;
+
+type SongRef = { artist: string; title: string };
+
+export interface Card {
+  track: Track;
+  reason: string;
+}
+
+export interface TrainData {
+  yes: Track[];
+  no: SongRef[];
+  /** The private Spotify copy of the yes list; null until the first yes. */
+  playlistId: string | null;
+}
+
+const KEY = "train";
+const ref = (t: SongRef): SongRef => ({ artist: t.artist, title: t.title });
+
+export async function loadTrain(): Promise<TrainData> {
+  return (await store.get<TrainData>(KEY)) ?? { yes: [], no: [], playlistId: null };
+}
+
+export async function saveTrain(data: TrainData): Promise<void> {
+  await store.set(KEY, data);
+}
+
+export const startPosition = (t: Track): number =>
+  t.durationMs ? Math.round(t.durationMs * START_AT) : DEFAULT_START_MS;
+
+/**
+ * Keep found, new songs only: not already judged, no duplicates. Pure, so
+ * it can be tested without Spotify.
+ */
+export function deckFrom(resolved: { pick: Pick; track: Track | null }[], data: TrainData): Card[] {
+  const seen = new Set([...data.yes, ...data.no].map((s) => songKey(s.artist, s.title)));
+  const cards: Card[] = [];
+  for (const { pick, track } of resolved) {
+    if (!track) continue;
+    const key = songKey(track.artist, track.title);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cards.push({ track, reason: pick.reason });
+  }
+  return cards.slice(0, DECK_SIZE);
+}
+
+/** Ask Claude for a deck of songs to judge, found on Spotify. */
+export async function buildDeck(
+  data: TrainData,
+  onProgress: (m: string) => void = () => {},
+): Promise<Card[]> {
+  onProgress("Reading your listening…");
+  const [topTracks, topArtists] = await Promise.all([spotify.getTopTracks(20), spotify.getTopArtists(20)]);
+  onProgress("Claude is picking songs to try…");
+  const picks = await curate({
+    mix: "Training deck: songs for the listener to judge one by one. Mostly new to them, a varied spread across their taste, a few bolder wildcards",
+    mode: "renew",
+    remove_count: 0,
+    add_count: DECK_SIZE + 3,
+    tune: { mood: 3, tempo: 3, energy: 3, fresh: 4, vocals: 3 },
+    loved: [...data.yes.slice(-15), ...topTracks.slice(0, 10)].map(ref),
+    blocked: data.no.slice(-150),
+    locked: [],
+    current: [],
+    top_artists: topArtists,
+    note: "",
+  });
+  onProgress("Finding them on Spotify…");
+  const cards = deckFrom(await spotify.findAll(picks.add), data);
+  if (cards.length === 0) throw new Error("None of Claude's picks were found on Spotify. Try again.");
+  return cards;
+}
+
+export type Verdict = "yes" | "no" | "later";
+
+/** Record a swipe. Yes also goes into the private "Géza · Yes" playlist. */
+export async function judge(
+  data: TrainData,
+  card: Card,
+  verdict: Verdict,
+  profile: Profile | null,
+): Promise<TrainData> {
+  if (verdict === "later") return data;
+  if (verdict === "no") {
+    const next = { ...data, no: [...data.no, ref(card.track)].slice(-500) };
+    await saveTrain(next);
+    return next;
+  }
+  let next: TrainData = { ...data, yes: [...data.yes.filter((t) => t.id !== card.track.id), card.track] };
+  await saveTrain(next);
+  // The Spotify copy is a convenience: if it fails, the local list still counts.
+  try {
+    let playlistId = next.playlistId;
+    if (!playlistId) {
+      const me = profile ?? (await spotify.getProfile());
+      playlistId = (
+        await spotify.createPlaylist(me.id, YES_PLAYLIST, "Songs you swiped yes on in Géza's Train.")
+      ).id;
+      next = { ...next, playlistId };
+      await saveTrain(next);
+    }
+    await spotify.addToPlaylist(playlistId, [card.track.uri]);
+  } catch {
+    // Ignore; retried implicitly next time a playlist id is missing.
+  }
+  return next;
+}
+
+/** Taste signals from Train, for every Claude request. */
+export function trainSignals(data: TrainData): { loved: SongRef[]; blocked: SongRef[] } {
+  return { loved: data.yes.slice(-25).map(ref), blocked: data.no.slice(-200) };
+}
