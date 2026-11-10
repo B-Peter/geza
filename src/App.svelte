@@ -8,6 +8,7 @@ import Settings from "./screens/Settings.svelte";
 import Setup from "./screens/Setup.svelte";
 import Welcome from "./screens/Welcome.svelte";
 import { app } from "./state.svelte.js";
+import Loader from "./ui/Loader.svelte";
 </script>
 
 {#if !app.ready}
@@ -30,6 +31,10 @@ import { app } from "./state.svelte.js";
   <Mixes />
 {/if}
 
+{#if app.busy}
+  <Loader message={app.busy} />
+{/if}
+
 {#if app.toast}
   <div class="toast" class:error={app.toast.kind === "error"} role="status" aria-live="polite">
     {app.toast.text}
@@ -41,7 +46,7 @@ import { app } from "./state.svelte.js";
   .splash { min-height: 100dvh; }
   .toast {
     position: fixed;
-    z-index: 20;
+    z-index: 40;
     left: 50%;
     transform: translateX(-50%);
     top: calc(12px + var(--safe-top));

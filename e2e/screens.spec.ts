@@ -175,3 +175,37 @@ test("flow: play something random", async ({ page }) => {
     "spotify:playlist:pl-studio-random",
   );
 });
+
+test("09 loading animation while playlists are created", async ({ page }) => {
+  await seed(page, { loggedIn: true, claudeKey: true });
+  await open(page, "./");
+  // Hold Spotify's answer so the loader is on screen long enough to check.
+  let release: () => void = () => {};
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  await page.route(/\/v1\/me\/playlists$/, async (route) => {
+    await held;
+    await route.fallback();
+  });
+  await page.getByRole("button", { name: "Create playlists" }).click();
+  const loader = page.getByRole("status").filter({ hasText: "Creating playlists…" });
+  await expect(loader).toBeVisible();
+  await expect(loader).toHaveAttribute("aria-busy", "true");
+  await expect(loader.getByText("Digging through the crates…")).toBeVisible();
+  await snap(page, "09-loading");
+  release();
+  await expect(page.getByRole("heading", { name: "Mixes", exact: true })).toBeVisible();
+  await expect(loader).toHaveCount(0);
+});
+
+test("loading animation stays still with Reduce Motion", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await seed(page, { loggedIn: true, claudeKey: true });
+  await open(page, "./");
+  await page.route(/\/v1\/me\/playlists$/, () => new Promise(() => {})); // never answers
+  await page.getByRole("button", { name: "Create playlists" }).click();
+  const bar = page.locator(".bar").first();
+  await expect(bar).toBeVisible();
+  expect(await bar.evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
+});
