@@ -528,8 +528,11 @@ export async function likedAmong(ids: string[]): Promise<Set<string>> {
 export interface Device {
   id: string;
   name: string;
+  /** "Smartphone", "Computer", "Speaker", "TV", … */
   type: string;
   is_active: boolean;
+  /** Spotify won't accept remote commands for this device (some speakers, TVs). */
+  is_restricted?: boolean;
 }
 
 export async function getDevices(): Promise<Device[]> {
@@ -574,11 +577,24 @@ export async function pause(deviceId: string): Promise<void> {
 }
 
 /** The track Spotify is playing right now, or null. */
-export async function nowPlaying(): Promise<{ trackId: string; isPlaying: boolean } | null> {
-  const json = await api<{ is_playing?: boolean; item?: { id?: string } | null } | null>(
-    "/me/player/currently-playing",
-  );
-  return json?.item?.id ? { trackId: json.item.id, isPlaying: Boolean(json.is_playing) } : null;
+/**
+ * What Spotify is playing right now and where, or null. Uses the playback
+ * state endpoint (covered by user-read-playback-state; the "currently
+ * playing" one needs a permission Géza doesn't ask for).
+ */
+export async function nowPlaying(): Promise<{
+  trackId: string;
+  isPlaying: boolean;
+  deviceId: string | null;
+} | null> {
+  const json = await api<{
+    is_playing?: boolean;
+    item?: { id?: string } | null;
+    device?: { id?: string | null } | null;
+  } | null>("/me/player");
+  return json?.item?.id
+    ? { trackId: json.item.id, isPlaying: Boolean(json.is_playing), deviceId: json.device?.id ?? null }
+    : null;
 }
 
 /** Look up each pick on Spotify, four at a time (gentle on rate limits). */

@@ -115,18 +115,52 @@ test("train: MusicBrainz adds the original year, origin and genres", async ({ pa
   expect(first.tags).toEqual(expect.arrayContaining(["indie rock", "90s", "driving", "britpop"]));
 });
 
-test("train: plays on this phone, not on another active device", async ({ page }) => {
+test("train: with several devices you pick one, and Géza remembers it", async ({ page }) => {
   player.list = [
     { id: "mac1", name: "MacBook", type: "Computer", is_active: true },
     { id: "phone1", name: "iPhone", type: "Smartphone", is_active: false },
+    { id: "tv1", name: "Living room TV", type: "TV", is_active: false, is_restricted: true } as never,
   ];
   await seed(page, ready);
   await open(page, "./#/train");
   await page.getByRole("button", { name: "Start a deck" }).click();
-  await expect(page.getByText(/Playing on iPhone · started in \d\.\d s/)).toBeVisible();
-  // The phone was woken first, then asked to play.
-  expect(player.transfers).toEqual(["phone1"]);
-  expect(player.plays[0]?.device).toBe("phone1");
+  const picker = page.getByRole("region", { name: "Where should Train play?" });
+  await expect(picker).toBeVisible();
+  await expect(picker.getByRole("button", { name: /MacBook.*Computer · active now/ })).toBeVisible();
+  // A device Spotify won't let apps control can't be picked.
+  await expect(picker.getByRole("button", { name: /Living room TV/ })).toBeDisabled();
+  await picker.getByRole("button", { name: /MacBook/ }).click();
+  await expect(page.getByText(/Playing on MacBook · started in \d\.\d s/)).toBeVisible();
+  expect(player.transfers).toEqual(["mac1"]);
+  expect(player.plays[0]?.device).toBe("mac1");
+  // Next time it goes straight to the MacBook.
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  await expect(page.getByText(/Playing on MacBook · started in/)).toBeVisible();
+  await expect(page.getByRole("region", { name: "Where should Train play?" })).toHaveCount(0);
+  // And you can switch while swiping.
+  await page.getByRole("button", { name: "Play on: MacBook · Change" }).click();
+  await page
+    .getByRole("region", { name: "Where should Train play?" })
+    .getByRole("button", { name: /iPhone/ })
+    .click();
+  await expect(page.getByText(/Playing on iPhone · started in/)).toBeVisible();
+});
+
+test("train: shows what Spotify said when it refuses to play", async ({ page, errors }) => {
+  player.reject = { status: 403, message: "Player command failed: Restriction violated" };
+  // The browser logs the refused request itself; that one is expected here.
+  const expected = /status of 403/;
+  page.on("console", () => {
+    for (let i = errors.length - 1; i >= 0; i--) if (expected.test(errors[i] ?? "")) errors.splice(i, 1);
+  });
+  await seed(page, ready);
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  const alert = page.getByRole("alert").filter({ hasText: "No sound?" });
+  await expect(alert.getByText(/Spotify said: Spotify 403 on .*Restriction violated/)).toBeVisible();
+  await expect(alert.getByRole("button", { name: "Change device" })).toBeVisible();
+  for (let i = errors.length - 1; i >= 0; i--) if (expected.test(errors[i] ?? "")) errors.splice(i, 1);
 });
 
 test("train: confirms the sound for every song, not just the first", async ({ page }) => {

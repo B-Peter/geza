@@ -46,6 +46,10 @@ export const player = {
   list: [PHONE] as FakeDevice[],
   /** Accepts play commands but never actually plays (an app iOS put to sleep). */
   silent: false,
+  /** Reject play commands with this Spotify error (status and message). */
+  reject: null as { status: number; message: string } | null,
+  /** The device the last play went to. */
+  on: null as string | null,
   playing: null as string | null,
   plays: [] as { uris: string[]; position_ms: number; device: string | null }[],
   transfers: [] as string[],
@@ -53,6 +57,8 @@ export const player = {
     this.devices = true;
     this.list = [PHONE];
     this.silent = false;
+    this.reject = null;
+    this.on = null;
     this.playing = null;
     this.plays = [];
     this.transfers = [];
@@ -121,6 +127,10 @@ export async function mockApis(page: Page): Promise<void> {
     if (path === "/me/player/devices") {
       return json({ devices: player.devices ? player.list : [] });
     }
+    if (path === "/me/player" && route.request().method() === "GET") {
+      if (!player.playing) return route.fulfill({ status: 204, headers: CORS });
+      return json({ is_playing: true, item: { id: player.playing }, device: { id: player.on } });
+    }
     if (path === "/me/player" && route.request().method() === "PUT") {
       const body = route.request().postDataJSON() as { device_ids: string[] };
       player.transfers.push(body.device_ids[0] ?? "");
@@ -128,6 +138,8 @@ export async function mockApis(page: Page): Promise<void> {
     }
     if (path === "/me/player/play" && route.request().method() === "PUT") {
       if (!player.devices) return json({ error: { message: "No active device found" } }, 404);
+      if (player.reject) return json({ error: { message: player.reject.message } }, player.reject.status);
+      player.on = url.searchParams.get("device_id");
       const body = route.request().postDataJSON() as { uris: string[]; position_ms: number };
       player.plays.push({ ...body, device: url.searchParams.get("device_id") });
       if (!player.silent) player.playing = body.uris[0]?.split(":").pop() ?? null;

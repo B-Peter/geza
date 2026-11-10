@@ -50,6 +50,14 @@ const extra = $derived(card ? details[card.track.id] : undefined);
 const firstYear = $derived(
   extra?.originalYear && card && extra.originalYear < (card.track.year ?? 9999) ? extra.originalYear : null,
 );
+const statusLine = $derived(
+  [
+    startedIn !== null && device ? `Playing on ${device.name} · started in ${startedIn.toFixed(1)} s` : "",
+    `${sessionYes} yes · ${sessionNo} no`,
+  ]
+    .filter(Boolean)
+    .join(" · "),
+);
 const listened = $derived(playingSince ? Math.max(0, Math.floor((now - playingSince) / 1000)) : 0);
 
 const mmss = (ms: number) =>
@@ -66,18 +74,67 @@ $effect(() => {
   };
 });
 
+const DEVICE_KEY = "ps.trainDevice";
+/** All Spotify devices, for the picker. */
+let devices = $state<spotify.Device[]>([]);
+/** The picker is open (no remembered device, or you tapped Change). */
+let choosing = $state(false);
+/** Spotify's last answer to a play command, shown when something goes wrong. */
+let lastReply = $state("");
+
+async function loadDevices(): Promise<void> {
+  devices = await spotify.getDevices().catch(() => []);
+}
+
+/**
+ * Use the device you picked before if Spotify still lists it; with exactly
+ * one usable device, use that; otherwise open the picker.
+ */
 async function findDevice(): Promise<boolean> {
-  device = spotify.pickDevice(await spotify.getDevices());
-  blocked = device ? null : "spotify";
+  await loadDevices();
+  const usable = devices.filter((d) => !d.is_restricted);
+  const saved = localStorage.getItem(DEVICE_KEY);
+  device = usable.find((d) => d.id === saved) ?? (usable.length === 1 ? (usable[0] ?? null) : null);
+  blocked = devices.length === 0 ? "spotify" : null;
+  choosing = devices.length > 0 && !device;
   return Boolean(device);
 }
 
-/** Play the deck from card i; measure how long until Spotify plays it. */
+function choose(d: spotify.Device) {
+  device = d;
+  localStorage.setItem(DEVICE_KEY, d.id);
+  choosing = false;
+  blocked = null;
+  if (deck.length && !done) void wakeAndPlay(index);
+}
+
+async function changeDevice() {
+  await loadDevices();
+  blocked = devices.length === 0 ? "spotify" : null;
+  choosing = devices.length > 0;
+}
+
+const deviceKind = (d: spotify.Device) =>
+  ({
+    smartphone: "Phone",
+    computer: "Computer",
+    speaker: "Speaker",
+    tv: "TV",
+    castaudio: "Cast speaker",
+    castvideo: "Cast TV",
+    tablet: "Tablet",
+    avr: "Receiver",
+    stb: "TV box",
+    gameconsole: "Console",
+    automobile: "Car",
+  })[d.type.toLowerCase()] ?? d.type;
+
 /** Bumped on every play, so an older play's check stops when a newer one starts. */
 let playToken = 0;
 /** Spotify accepted the command but no sound was confirmed within ~3 s. */
 let noSound = $state(false);
 
+/** Play the deck from card i; measure how long until Spotify plays it. */
 async function playFrom(i: number) {
   const current = deck[i];
   if (!current || !device) return;
@@ -92,16 +149,20 @@ async function playFrom(i: number) {
       deck.slice(i).map((c) => c.track.uri),
       startPosition(current.track),
     );
+    lastReply = "Spotify accepted the play command.";
   } catch (e) {
+    lastReply = e instanceof Error ? e.message : String(e);
     if (e instanceof SpotifyError && e.status === 404) {
-      blocked = "spotify";
+      // The device dropped off (asleep or closed): let you pick again.
+      await changeDevice();
+      noSound = devices.length > 0;
       return;
     }
-    if (e instanceof SpotifyError && e.status === 403) {
+    if (e instanceof SpotifyError && e.status === 403 && /premium/i.test(e.message)) {
       blocked = "premium";
       return;
     }
-    app.notify(e);
+    noSound = true;
     return;
   }
   playingSince = Date.now();
@@ -116,9 +177,12 @@ async function playFrom(i: number) {
     }
     await new Promise((r) => setTimeout(r, 150));
   }
-  // Spotify said yes, but nothing is playing: usually an app iOS put to sleep,
-  // or the sound went to another device. Say so instead of failing silently.
-  if (token === playToken) noSound = true;
+  // Spotify said yes, but nothing is playing: usually an app the system put
+  // to sleep. Say so instead of failing silently.
+  if (token === playToken) {
+    lastReply = `${lastReply} But nothing started playing within 3 seconds.`;
+    noSound = true;
+  }
 }
 
 /** Wake the chosen Spotify app, then play from card i. */
@@ -146,7 +210,10 @@ async function start() {
 }
 
 async function retrySpotify() {
-  if (await findDevice()) void wakeAndPlay(index);
+  if (device) {
+    await loadDevices();
+    void wakeAndPlay(index);
+  } else if (await findDevice()) void wakeAndPlay(index);
 }
 
 // Coming back from the Spotify app: try again on its own.
@@ -226,8 +293,32 @@ $effect(() => {
 <BackButton href="#/" label="Back to mixes" />
 
 <main class="screen train">
-  {#if card && !done}<div class="counter">{index + 1} / {deck.length}</div>{/if}
+  {#if card && !done && !choosing}<div class="counter">{index + 1} / {deck.length}</div>{/if}
   <h1>Train Géza</h1>
+
+  {#if choosing}
+    <section class="card picker" aria-label="Where should Train play?">
+      <div class="picker-title">Where should Train play?</div>
+      <p class="small muted">Your Spotify devices right now. Géza remembers your choice.</p>
+      <ul class="device-list">
+        {#each devices as d (d.id)}
+          <li>
+            <button class="device" class:current={device?.id === d.id} disabled={d.is_restricted} onclick={() => choose(d)}>
+              <span class="device-name">{d.name}</span>
+              <span class="small muted">
+                {deviceKind(d)}{d.is_active ? " · active now" : ""}{d.is_restricted ? " · Spotify doesn't allow remote control" : ""}
+              </span>
+            </button>
+          </li>
+        {/each}
+      </ul>
+      <p class="small muted">Not listed? Open Spotify on that device and play anything for a second.</p>
+      <div class="two">
+        <a class="btn secondary small" href="spotify:">Open Spotify</a>
+        <button class="btn secondary small" onclick={changeDevice}>Refresh list</button>
+      </div>
+    </section>
+  {/if}
 
   {#if blocked === "spotify"}
     <div class="card notice" role="status">
@@ -252,7 +343,7 @@ $effect(() => {
     </div>
   {/if}
 
-  {#if card && !done}
+  {#if card && !done && !choosing}
     <div class="deck">
       <div class="behind" aria-hidden="true"></div>
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -338,19 +429,21 @@ $effect(() => {
       <div class="card nosound" role="alert">
         <strong>No sound?</strong>
         <p class="small muted">
-          Spotify on “{device?.name ?? "your device"}” didn't start. Open Spotify, tap play on any song once, then come
-          back and try again.
+          Spotify on “{device?.name ?? "your device"}” didn't start. Open Spotify there, tap play on any song once, then
+          come back and try again, or pick another device.
         </p>
+        {#if lastReply}<p class="reply small">Spotify said: {lastReply}</p>{/if}
         <div class="two">
+          <button class="btn secondary small" onclick={changeDevice}>Change device</button>
           <a class="btn secondary small" href="spotify:">Open Spotify</a>
           <button class="btn small" onclick={retrySpotify}>Try again</button>
         </div>
       </div>
     {/if}
-    <p class="status small muted" aria-live="polite">
-      {#if startedIn !== null}Playing on {device?.name} · started in {startedIn.toFixed(1)} s ·
-      {/if}{sessionYes} yes · {sessionNo} no
-    </p>
+    {#if device && !choosing}
+      <button class="device-chip small" onclick={changeDevice}>Play on: {device.name} · Change</button>
+    {/if}
+    <p class="status small muted" aria-live="polite">{statusLine}</p>
   {:else if done}
     <div class="card notice center">
       <div class="notice-title big">Deck done</div>
@@ -367,7 +460,7 @@ $effect(() => {
         <button class="btn small" onclick={start} disabled={!!app.busy}>New deck</button>
       </div>
     </div>
-  {:else if !blocked}
+  {:else if !blocked && !choosing}
     <p class="lead">
       Claude picks {DECK_SIZE} songs, mostly new to you. Each one starts at its catchy part. You stay in Géza; the sound comes
       from your Spotify app.
@@ -489,6 +582,25 @@ $effect(() => {
   .status { text-align: center; margin: 12px 0 0; }
   .nosound { margin-top: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
   .nosound p { margin: 0 0 4px; }
+  .reply {
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 17px;
+    background: var(--bg); border-radius: 10px; padding: 8px 10px; word-break: break-word;
+  }
+  .picker { margin-top: 16px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .picker p { margin: 0; }
+  .picker-title { font: 800 20px/24px var(--display); }
+  .device-list { list-style: none; margin: 4px 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .device {
+    width: 100%; min-height: 56px; padding: 8px 14px; border-radius: 16px; border: 1.5px solid var(--line);
+    background: var(--white); text-align: left; cursor: pointer; display: flex; flex-direction: column; justify-content: center;
+  }
+  .device.current { border-color: var(--ink); background: var(--lime); }
+  .device:disabled { opacity: 0.5; cursor: default; }
+  .device-name { font-weight: 700; }
+  .device-chip {
+    display: block; margin: 12px auto 0; min-height: 44px; padding: 0 16px; border-radius: 22px;
+    border: 1.5px solid var(--line); background: var(--white); font-weight: 600; cursor: pointer;
+  }
   .stats { width: 100%; margin: 8px 0 6px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .stat { border-radius: 22px; padding: 12px; background: var(--bg); font-size: 13px; font-weight: 700; }
   .stat.yes { background: var(--lime); }

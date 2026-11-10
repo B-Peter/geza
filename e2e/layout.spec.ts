@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, open, type SeedOptions, seed, test } from "./fixtures.js";
+import { expect, open, player, type SeedOptions, seed, test } from "./fixtures.js";
 
 // Layout audit in Safari's engine (WebKit), at iPhone size: every screen must
 // fit the width, show its text in full, and keep tap targets at least 44 px.
@@ -46,6 +46,19 @@ const SCREENS: Screen[] = [
     ready: (p) => p.getByText("Linked as Peter").waitFor(),
   },
   { name: "random", seed: all, path: "./#/random", ready: (p) => p.getByText("Start from").waitFor() },
+  {
+    name: "train-picker",
+    seed: all,
+    path: "./#/train",
+    ready: async (p) => {
+      player.list = [
+        { id: "mac1", name: "MacBook Pro", type: "Computer", is_active: true },
+        { id: "phone1", name: "Peter's iPhone", type: "Smartphone", is_active: false },
+      ];
+      await p.getByRole("button", { name: "Start a deck" }).click();
+      await p.getByRole("region", { name: "Where should Train play?" }).waitFor();
+    },
+  },
   { name: "train", seed: all, path: "./#/train", ready: (p) => p.getByText("Swipe right: keep").waitFor() },
   {
     name: "train-card",
