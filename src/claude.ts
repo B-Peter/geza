@@ -26,14 +26,26 @@ export async function removeKey(): Promise<void> {
   await deleteSecret(KEY_SECRET);
 }
 
+/**
+ * What a paste really contains: phones and password managers can add
+ * zero-width characters, non-breaking spaces or surrounding quotes.
+ */
+export function cleanKey(input: string): string {
+  return input
+    .replace(/[​-‍⁠﻿ ]/g, "")
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, "");
+}
+
 /** Checks the key with a Models API lookup (no tokens spent), then saves it. */
 export async function testAndSaveKey(input: string): Promise<void> {
-  const apiKey = input.trim();
+  const apiKey = cleanKey(input);
   // Admin keys can manage the whole Anthropic organization; never keep one in a browser.
   if (apiKey.startsWith("sk-ant-admin"))
     throw new Error("That's an admin key. Create a regular API key just for this app instead.");
-  if (!apiKey.startsWith("sk-ant-api"))
-    throw new Error("That doesn't look like an Anthropic API key (sk-ant-api…).");
+  // Only a sanity check; Anthropic decides whether the key is valid (below).
+  if (apiKey.length < 20 || /\s/.test(apiKey))
+    throw new Error("That doesn't look like an Anthropic API key. Copy it again from the console.");
   try {
     await client(apiKey).models.retrieve(MODEL);
   } catch (e) {
