@@ -1,5 +1,7 @@
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/bricolage-grotesque";
+/* Géza's pixel font (labels only), latin subset. */
+@import "@fontsource/press-start-2p/latin-400.css";
 
 :root {
   --ink: #14130f;

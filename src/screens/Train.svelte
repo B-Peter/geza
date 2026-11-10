@@ -130,7 +130,10 @@ function decide(verdict: Verdict) {
   const next = index + 1;
   if (next < deck.length) void playFrom(next);
   else if (device) void spotify.pause(device.id).catch(() => {});
-  void judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell).then((d) => (data = d));
+  void judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell).then((d) => {
+    data = d;
+    void app.refreshGeza();
+  });
   setTimeout(() => {
     index = next;
     leaving = null;

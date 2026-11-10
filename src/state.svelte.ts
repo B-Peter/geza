@@ -1,10 +1,16 @@
 // App-wide state (Svelte 5 runes) and the hash router.
 
 import * as claude from "./claude.js";
+import type { Level } from "./geza/sprite.js";
+import { type LevelInfo, levelFor, xpFrom } from "./geza/xp.js";
 import { type LearnSummary, learnFromSpotify } from "./learn.js";
+import { loadLedger } from "./ledger.js";
 import { loadMixes, loadPending, type Mix, type MixId, type PendingSwap, saveMixes } from "./mixes.js";
 import * as spotify from "./spotify.js";
 import { type Profile, SessionExpiredError } from "./spotify.js";
+import * as store from "./store.js";
+import { buildTaste, type TasteProfile } from "./taste.js";
+import { loadTrain } from "./train.js";
 
 export type Route =
   | { name: "mixes" }
@@ -75,6 +81,40 @@ class AppState {
    * Runs once at a time; failures are quiet (it's a background nicety),
    * except an expired login, which sends you back to Welcome.
    */
+  /** Géza's current level and XP; null until first computed. */
+  geza = $state<LevelInfo | null>(null);
+  /** The taste profile from Train swipes (for Géza's chat line). */
+  taste = $state<TasteProfile | null>(null);
+  /** A level reached but not yet celebrated: shows the level-up screen. */
+  levelUp = $state<Level | null>(null);
+
+  /** Recount everything Géza has learned and notice a new level. */
+  async refreshGeza(): Promise<void> {
+    const train = await loadTrain();
+    let plays = 0;
+    let hearts = 0;
+    for (const id of MIX_IDS) {
+      for (const e of Object.values((await loadLedger(id)).entries)) {
+        plays += e.plays;
+        if (e.liked) hearts += 1;
+      }
+    }
+    const info = levelFor(xpFrom({ swipes: train.history.length, plays, hearts }));
+    this.geza = info;
+    this.taste = buildTaste(train.history);
+    const seen = await store.get<number>("geza:seenLevel");
+    if (seen === undefined && info.level.n === 1) {
+      await store.set("geza:seenLevel", 1);
+    } else if (info.level.n > (seen ?? 1)) {
+      this.levelUp = info.level;
+    }
+  }
+
+  async dismissLevelUp(): Promise<void> {
+    if (this.levelUp) await store.set("geza:seenLevel", this.levelUp.n);
+    this.levelUp = null;
+  }
+
   learn(): Promise<void> {
     if (!this.loggedIn || this.needsReconnect || this.needsPlaylists || !navigator.onLine) {
       return Promise.resolve();
@@ -91,6 +131,7 @@ class AppState {
           }),
         );
         this.learned = summary;
+        await this.refreshGeza();
       } catch (e) {
         if (e instanceof SessionExpiredError) this.notify(e);
       } finally {
@@ -122,7 +163,7 @@ class AppState {
       }
     }
     this.ready = true;
-    void this.learn();
+    void this.refreshGeza().then(() => this.learn());
   }
 
   mix(id: MixId): Mix {
