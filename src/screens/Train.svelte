@@ -73,11 +73,18 @@ async function findDevice(): Promise<boolean> {
 }
 
 /** Play the deck from card i; measure how long until Spotify plays it. */
+/** Bumped on every play, so an older play's check stops when a newer one starts. */
+let playToken = 0;
+/** Spotify accepted the command but no sound was confirmed within ~3 s. */
+let noSound = $state(false);
+
 async function playFrom(i: number) {
   const current = deck[i];
   if (!current || !device) return;
+  const token = ++playToken;
   startedIn = null;
   playingSince = null;
+  noSound = false;
   const t0 = performance.now();
   try {
     await spotify.playList(
@@ -98,9 +105,10 @@ async function playFrom(i: number) {
     return;
   }
   playingSince = Date.now();
-  // Ask Spotify what's playing until it's this song (at most ~3 s).
-  for (let n = 0; n < 20 && deck[index]?.track.id === current.track.id; n++) {
+  // Ask Spotify what's playing until it's this song (about 3 s at most).
+  for (let n = 0; n < 20 && token === playToken; n++) {
     const playing = await spotify.nowPlaying().catch(() => null);
+    if (token !== playToken) return;
     if (playing?.trackId === current.track.id && playing.isPlaying) {
       startedIn = (performance.now() - t0) / 1000;
       playingSince = Date.now();
@@ -108,6 +116,20 @@ async function playFrom(i: number) {
     }
     await new Promise((r) => setTimeout(r, 150));
   }
+  // Spotify said yes, but nothing is playing: usually an app iOS put to sleep,
+  // or the sound went to another device. Say so instead of failing silently.
+  if (token === playToken) noSound = true;
+}
+
+/** Wake the chosen Spotify app, then play from card i. */
+async function wakeAndPlay(i: number) {
+  if (!device) return;
+  const token = playToken;
+  await spotify.transferTo(device.id).catch(() => {});
+  await new Promise((r) => setTimeout(r, 300));
+  // You swiped while Spotify was waking: that newer play wins.
+  if (token !== playToken) return;
+  await playFrom(i);
 }
 
 async function start() {
@@ -120,17 +142,18 @@ async function start() {
   index = 0;
   sessionYes = 0;
   sessionNo = 0;
-  if (await findDevice()) void playFrom(0);
+  if (await findDevice()) void wakeAndPlay(0);
 }
 
 async function retrySpotify() {
-  if (await findDevice()) void playFrom(index);
+  if (await findDevice()) void wakeAndPlay(index);
 }
 
 // Coming back from the Spotify app: try again on its own.
 $effect(() => {
   const back = () => {
-    if (document.visibilityState === "visible" && blocked === "spotify" && deck.length) void retrySpotify();
+    if (document.visibilityState === "visible" && (blocked === "spotify" || noSound) && deck.length)
+      void retrySpotify();
   };
   document.addEventListener("visibilitychange", back);
   return () => document.removeEventListener("visibilitychange", back);
@@ -311,8 +334,22 @@ $effect(() => {
         <span aria-hidden="true">♥</span>
       </button>
     </div>
+    {#if noSound}
+      <div class="card nosound" role="alert">
+        <strong>No sound?</strong>
+        <p class="small muted">
+          Spotify on “{device?.name ?? "your device"}” didn't start. Open Spotify, tap play on any song once, then come
+          back and try again.
+        </p>
+        <div class="two">
+          <a class="btn secondary small" href="spotify:">Open Spotify</a>
+          <button class="btn small" onclick={retrySpotify}>Try again</button>
+        </div>
+      </div>
+    {/if}
     <p class="status small muted" aria-live="polite">
-      {#if startedIn !== null}Started in {startedIn.toFixed(1)} s · {/if}{sessionYes} yes · {sessionNo} no
+      {#if startedIn !== null}Playing on {device?.name} · started in {startedIn.toFixed(1)} s ·
+      {/if}{sessionYes} yes · {sessionNo} no
     </p>
   {:else if done}
     <div class="card notice center">
@@ -450,6 +487,8 @@ $effect(() => {
   .no { background: var(--white); color: var(--danger); }
   .yes { background: var(--lime); color: var(--ink); border: 2px solid var(--ink); }
   .status { text-align: center; margin: 12px 0 0; }
+  .nosound { margin-top: 14px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+  .nosound p { margin: 0 0 4px; }
   .stats { width: 100%; margin: 8px 0 6px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
   .stat { border-radius: 22px; padding: 12px; background: var(--bg); font-size: 13px; font-weight: 700; }
   .stat.yes { background: var(--lime); }

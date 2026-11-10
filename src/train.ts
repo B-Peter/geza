@@ -8,7 +8,7 @@ import type { Profile, Track } from "./spotify.js";
 import * as spotify from "./spotify.js";
 import * as store from "./store.js";
 import { buildTaste, type Judgement, type TasteProfile, type Verdict } from "./taste.js";
-import { songKey } from "./text.js";
+import { normalize, songKey } from "./text.js";
 
 export const DECK_SIZE = 15;
 export const YES_PLAYLIST = "Géza · Yes";
@@ -53,14 +53,40 @@ export const startPosition = (t: Track): number =>
  * Keep found, new songs only: not already judged, no duplicates. Pure, so
  * it can be tested without Spotify.
  */
-export function deckFrom(resolved: { pick: Pick; track: Track | null }[], data: TrainData): Card[] {
+/** What the listener already knows, so the deck can be mostly new songs. */
+export interface Known {
+  /** Spotify IDs of songs they know: liked, top tracks, recently played. */
+  trackIds: Set<string>;
+  /** Artists they know (normalised names): top artists and swiped-yes artists. */
+  artists: Set<string>;
+}
+
+/** At most this many cards per deck may come from artists you already know. */
+export const MAX_KNOWN_ARTISTS = 3;
+
+const firstArtist = (artist: string) => normalize(artist.split(",")[0] ?? artist);
+
+/**
+ * Keep found, new songs only: never a song you already know or have judged,
+ * no duplicates, and at most MAX_KNOWN_ARTISTS from familiar artists. Pure,
+ * so it can be tested without Spotify.
+ */
+export function deckFrom(
+  resolved: { pick: Pick; track: Track | null }[],
+  data: TrainData,
+  known: Known = { trackIds: new Set(), artists: new Set() },
+): Card[] {
   const seen = new Set([...data.yes, ...data.no].map((s) => songKey(s.artist, s.title)));
   const cards: Card[] = [];
+  let familiar = 0;
   for (const { pick, track } of resolved) {
-    if (!track) continue;
+    if (!track || known.trackIds.has(track.id)) continue;
     const key = songKey(track.artist, track.title);
     if (seen.has(key)) continue;
+    const knownArtist = known.artists.has(firstArtist(track.artist));
+    if (knownArtist && familiar >= MAX_KNOWN_ARTISTS) continue;
     seen.add(key);
+    if (knownArtist) familiar++;
     cards.push({ track, reason: pick.reason, tags: (pick.tags ?? []).slice(0, 4) });
   }
   return cards.slice(0, DECK_SIZE);
@@ -72,14 +98,19 @@ export async function buildDeck(
   onProgress: (m: string) => void = () => {},
 ): Promise<Card[]> {
   onProgress("Reading your listening…");
-  const [topTracks, topArtists] = await Promise.all([spotify.getTopTracks(20), spotify.getTopArtists(20)]);
+  const [topTracks, topArtists, recent] = await Promise.all([
+    spotify.getTopTracks(50),
+    spotify.getTopArtists(30),
+    spotify.getRecentlyPlayed(null).catch(() => ({ plays: [], complete: false })),
+  ]);
   onProgress("Claude is picking songs to try…");
   const picks = await curate({
-    mix: "Training deck: songs for the listener to judge one by one. Mostly new to them, a varied spread across their taste, a few bolder wildcards",
+    mix: `Training deck: songs for the listener to judge one by one. At least ${DECK_SIZE - MAX_KNOWN_ARTISTS} must be songs they have very likely never heard, by artists NOT in top_artists or loved: lesser-known tracks and artists that fit their taste. At most ${MAX_KNOWN_ARTISTS} from artists they already know, and never their well-known hits. A varied spread with a few bolder wildcards`,
     mode: "renew",
     remove_count: 0,
-    add_count: DECK_SIZE + 3,
-    tune: { mood: 3, tempo: 3, energy: 3, fresh: 4, vocals: 3 },
+    // Extra picks, because known songs are filtered out afterwards.
+    add_count: DECK_SIZE + 8,
+    tune: { mood: 3, tempo: 3, energy: 3, fresh: 5, vocals: 3 },
     loved: [...data.yes.slice(-15), ...topTracks.slice(0, 10)].map(ref),
     blocked: data.no.slice(-150),
     taste: buildTaste(data.history),
@@ -89,7 +120,15 @@ export async function buildDeck(
     note: "",
   });
   onProgress("Finding them on Spotify…");
-  const cards = deckFrom(await spotify.findAll(picks.add), data);
+  const found = await spotify.findAll(picks.add);
+  // Liked Songs is the strongest "I know this": check the found tracks against it.
+  const foundIds = found.flatMap((f) => (f.track ? [f.track.id] : []));
+  const liked = await spotify.likedAmong(foundIds).catch(() => new Set<string>());
+  const known: Known = {
+    trackIds: new Set([...topTracks.map((t) => t.id), ...recent.plays.map((p) => p.trackId), ...liked]),
+    artists: new Set([...topArtists, ...data.yes.map((t) => t.artist)].map(firstArtist)),
+  };
+  const cards = deckFrom(found, data, known);
   if (cards.length === 0) throw new Error("None of Claude's picks were found on Spotify. Try again.");
   return cards;
 }

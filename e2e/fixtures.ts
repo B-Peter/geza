@@ -37,10 +37,26 @@ const SEARCH_RESULTS: Record<string, ReturnType<typeof track> & Record<string, u
 };
 
 /** The fake Spotify app on the phone: what was asked to play, and whether it exists. */
+type FakeDevice = { id: string; name: string; type: string; is_active: boolean };
+const PHONE: FakeDevice = { id: "phone1", name: "iPhone", type: "Smartphone", is_active: true };
+
 export const player = {
   devices: true,
+  /** Devices Spotify lists (default: just the phone). */
+  list: [PHONE] as FakeDevice[],
+  /** Accepts play commands but never actually plays (an app iOS put to sleep). */
+  silent: false,
   playing: null as string | null,
-  plays: [] as { uris: string[]; position_ms: number }[],
+  plays: [] as { uris: string[]; position_ms: number; device: string | null }[],
+  transfers: [] as string[],
+  reset() {
+    this.devices = true;
+    this.list = [PHONE];
+    this.silent = false;
+    this.playing = null;
+    this.plays = [];
+    this.transfers = [];
+  },
 };
 
 export const CLAUDE_PICKS = {
@@ -103,17 +119,18 @@ export async function mockApis(page: Page): Promise<void> {
       return json({ snapshot_id: "s1" });
     }
     if (path === "/me/player/devices") {
-      return json({
-        devices: player.devices
-          ? [{ id: "phone1", name: "iPhone", type: "Smartphone", is_active: true }]
-          : [],
-      });
+      return json({ devices: player.devices ? player.list : [] });
+    }
+    if (path === "/me/player" && route.request().method() === "PUT") {
+      const body = route.request().postDataJSON() as { device_ids: string[] };
+      player.transfers.push(body.device_ids[0] ?? "");
+      return route.fulfill({ status: 204, headers: CORS });
     }
     if (path === "/me/player/play" && route.request().method() === "PUT") {
       if (!player.devices) return json({ error: { message: "No active device found" } }, 404);
       const body = route.request().postDataJSON() as { uris: string[]; position_ms: number };
-      player.plays.push(body);
-      player.playing = body.uris[0]?.split(":").pop() ?? null;
+      player.plays.push({ ...body, device: url.searchParams.get("device_id") });
+      if (!player.silent) player.playing = body.uris[0]?.split(":").pop() ?? null;
       return route.fulfill({ status: 204, headers: CORS });
     }
     if (path === "/me/player/pause") {
@@ -303,9 +320,7 @@ export const test = base.extend<{ errors: string[] }>({
         page.on("pageerror", (e) => console.log("PAGEERROR", e.stack));
       }
       // Fresh fake Spotify app for every test.
-      player.devices = true;
-      player.playing = null;
-      player.plays = [];
+      player.reset();
       await mockApis(page);
       await use(errors);
     },

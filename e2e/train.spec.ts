@@ -26,7 +26,7 @@ test("11 train card with song details", async ({ page }) => {
   await expect(card.getByText("driving")).toBeVisible();
   await expect(card.getByRole("img", { name: "Popularity 3 of 5" })).toBeVisible();
   await expect(card.getByText("Like your loved tracks")).toBeVisible();
-  await expect(page.getByText(/Started in \d\.\d s/)).toBeVisible();
+  await expect(page.getByText(/Playing on iPhone · started in \d\.\d s/)).toBeVisible();
   // One request starts the whole deck in Spotify, skipping the intro.
   expect(player.plays[0]?.uris).toEqual(["spotify:track:t101", "spotify:track:t102"]);
   expect(player.plays[0]?.position_ms).toBe(Math.round(222_000 * 0.35));
@@ -113,4 +113,44 @@ test("train: MusicBrainz adds the original year, origin and genres", async ({ pa
   });
   expect(first).toMatchObject({ year: 1994, country: "GB" });
   expect(first.tags).toEqual(expect.arrayContaining(["indie rock", "90s", "driving", "britpop"]));
+});
+
+test("train: plays on this phone, not on another active device", async ({ page }) => {
+  player.list = [
+    { id: "mac1", name: "MacBook", type: "Computer", is_active: true },
+    { id: "phone1", name: "iPhone", type: "Smartphone", is_active: false },
+  ];
+  await seed(page, ready);
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  await expect(page.getByText(/Playing on iPhone · started in \d\.\d s/)).toBeVisible();
+  // The phone was woken first, then asked to play.
+  expect(player.transfers).toEqual(["phone1"]);
+  expect(player.plays[0]?.device).toBe("phone1");
+});
+
+test("train: confirms the sound for every song, not just the first", async ({ page }) => {
+  await seed(page, ready);
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  await expect(page.getByText(/Playing on iPhone · started in/)).toBeVisible();
+  await page.getByRole("button", { name: "Yes, I like it" }).click();
+  await expect(page.getByRole("article", { name: /Open Window/ })).toBeVisible();
+  // This stayed blank for the second song before the fix.
+  await expect(page.getByText(/Playing on iPhone · started in/)).toBeVisible();
+});
+
+test("train: says so when Spotify accepts but stays silent", async ({ page }) => {
+  player.silent = true;
+  await seed(page, ready);
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  const alert = page.getByRole("alert").filter({ hasText: "No sound?" });
+  await expect(alert).toBeVisible();
+  await expect(alert.getByText(/Spotify on “iPhone” didn't start/)).toBeVisible();
+  // You opened Spotify and pressed play; trying again now works.
+  player.silent = false;
+  await alert.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByText(/Playing on iPhone · started in/)).toBeVisible();
+  await expect(alert).toHaveCount(0);
 });

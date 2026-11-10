@@ -538,13 +538,23 @@ export async function getDevices(): Promise<Device[]> {
 }
 
 /** The phone's Spotify app if it's running, else whatever is active. */
+/**
+ * Where Train should play: this phone first (you're holding it), even if a
+ * computer or speaker was the last active device; then whatever is active.
+ */
 export function pickDevice(devices: Device[]): Device | null {
+  const phones = devices.filter((d) => d.type.toLowerCase() === "smartphone");
   return (
-    devices.find((d) => d.is_active) ??
-    devices.find((d) => d.type.toLowerCase() === "smartphone") ??
-    devices[0] ??
-    null
+    phones.find((d) => d.is_active) ?? phones[0] ?? devices.find((d) => d.is_active) ?? devices[0] ?? null
   );
+}
+
+/**
+ * Move playback to a device without starting anything. Wakes a Spotify app
+ * that is listed but idle, so the next play command actually sounds.
+ */
+export async function transferTo(deviceId: string): Promise<void> {
+  await api("/me/player", { method: "PUT", body: { device_ids: [deviceId], play: false } });
 }
 
 /**
