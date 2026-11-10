@@ -576,28 +576,54 @@ export async function pause(deviceId: string): Promise<void> {
   await api(`/me/player/pause?device_id=${encodeURIComponent(deviceId)}`, { method: "PUT" });
 }
 
-/** The track Spotify is playing right now, or null. */
+export interface NowPlaying {
+  trackId: string;
+  /** Also the original ID when Spotify swapped in another version for your country. */
+  linkedFromId: string | null;
+  title: string;
+  isPlaying: boolean;
+  deviceId: string | null;
+  deviceName: string | null;
+}
+
 /**
  * What Spotify is playing right now and where, or null. Uses the playback
  * state endpoint (covered by user-read-playback-state; the "currently
  * playing" one needs a permission Géza doesn't ask for).
  */
-export async function nowPlaying(): Promise<{
-  trackId: string;
-  isPlaying: boolean;
-  deviceId: string | null;
-} | null> {
+export async function nowPlaying(): Promise<NowPlaying | null> {
   const json = await api<{
     is_playing?: boolean;
-    item?: { id?: string } | null;
-    device?: { id?: string | null } | null;
+    item?: { id?: string; name?: string; linked_from?: { id?: string } | null } | null;
+    device?: { id?: string | null; name?: string | null } | null;
   } | null>("/me/player");
-  return json?.item?.id
-    ? { trackId: json.item.id, isPlaying: Boolean(json.is_playing), deviceId: json.device?.id ?? null }
-    : null;
+  if (!json?.item?.id) return null;
+  return {
+    trackId: json.item.id,
+    linkedFromId: json.item.linked_from?.id ?? null,
+    title: json.item.name ?? "",
+    isPlaying: Boolean(json.is_playing),
+    deviceId: json.device?.id ?? null,
+    deviceName: json.device?.name ?? null,
+  };
 }
 
-/** Look up each pick on Spotify, four at a time (gentle on rate limits). */
+/** Is Spotify playing this track (allowing for a swapped-in version)? */
+export function isPlayingTrack(p: NowPlaying | null, t: { id: string; title: string }): boolean {
+  if (!p?.isPlaying) return false;
+  return p.trackId === t.id || p.linkedFromId === t.id || normalize(p.title) === normalize(t.title);
+}
+
+/** Spotify's own view of playback, in a sentence, for the "No sound?" card. */
+export function describePlayback(p: NowPlaying | null): string {
+  if (!p) return "Spotify reports nothing playing on any device.";
+  const where = p.deviceName ? ` on “${p.deviceName}”` : "";
+  return p.isPlaying
+    ? `Spotify reports “${p.title}” playing${where}.`
+    : `Spotify reports “${p.title}” paused${where}.`;
+}
+
+/** Look up each pick on Spotify, six at a time (gentle on rate limits). */
 export async function findAll<P extends { artist: string; title: string }>(
   picks: P[],
 ): Promise<{ pick: P; track: Track | null }[]> {
@@ -610,6 +636,6 @@ export async function findAll<P extends { artist: string; title: string }>(
       if (pick) out[i] = { pick, track: await findTrack(pick.artist, pick.title) };
     }
   };
-  await Promise.all([worker(), worker(), worker(), worker()]);
+  await Promise.all(Array.from({ length: 6 }, worker));
   return out;
 }

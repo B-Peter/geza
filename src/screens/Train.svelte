@@ -1,10 +1,10 @@
 <script lang="ts">
+import { prefetchDeck, takeDeck } from "../deckCache.js";
 import { countryName, type Enrichment, enrich } from "../musicbrainz.js";
 import * as spotify from "../spotify.js";
 import { SpotifyError } from "../spotify.js";
 import { app } from "../state.svelte.js";
 import {
-  buildDeck,
   type Card,
   DECK_SIZE,
   judge,
@@ -65,7 +65,11 @@ const mmss = (ms: number) =>
 const TAG_TONES = ["tone-genre", "tone-era", "tone-mood", "tone-extra"];
 
 $effect(() => {
-  void loadTrain().then((d) => (data = d));
+  void loadTrain().then((d) => {
+    data = d;
+    // Get a deck ready while you read the screen, so Start is instant.
+    prefetchDeck(d);
+  });
   const tick = setInterval(() => (now = Date.now()), 1000);
   return () => {
     clearInterval(tick);
@@ -170,7 +174,7 @@ async function playFrom(i: number) {
   for (let n = 0; n < 20 && token === playToken; n++) {
     const playing = await spotify.nowPlaying().catch(() => null);
     if (token !== playToken) return;
-    if (playing?.trackId === current.track.id && playing.isPlaying) {
+    if (spotify.isPlayingTrack(playing, current.track)) {
       startedIn = (performance.now() - t0) / 1000;
       playingSince = Date.now();
       return;
@@ -180,7 +184,8 @@ async function playFrom(i: number) {
   // Spotify said yes, but nothing is playing: usually an app the system put
   // to sleep. Say so instead of failing silently.
   if (token === playToken) {
-    lastReply = `${lastReply} But nothing started playing within 3 seconds.`;
+    const state = await spotify.nowPlaying().catch(() => null);
+    lastReply = `${lastReply} But it didn't start within 3 seconds. ${spotify.describePlayback(state)}`;
     noSound = true;
   }
 }
@@ -199,7 +204,7 @@ async function wakeAndPlay(i: number) {
 async function start() {
   if (!data) return;
   const current = $state.snapshot(data) as TrainData;
-  const cards = await app.task("Starting…", (progress) => buildDeck(current, progress));
+  const cards = await app.task("Starting…", (progress) => takeDeck(current, progress));
   if (!cards) return;
   deck = cards;
   void enrichDeck(cards);
@@ -239,9 +244,11 @@ function decide(verdict: Verdict) {
   if (next < deck.length) void playFrom(next);
   else if (device) void spotify.pause(device.id).catch(() => {});
   const extra = $state.snapshot(details[judged.track.id] ?? { genres: [] }) as Enrichment;
-  void judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell, extra).then(
-    (d) => (data = d),
-  );
+  void judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell, extra).then((d) => {
+    data = d;
+    // Near the end of a deck, prepare the next one with your latest swipes.
+    if (next === deck.length - 5) prefetchDeck(d);
+  });
   setTimeout(() => {
     index = next;
     leaving = null;

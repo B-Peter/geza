@@ -181,7 +181,13 @@ const PICKS_SCHEMA = {
   additionalProperties: false,
 };
 
-export async function curate(input: CurateInput): Promise<Picks> {
+/**
+ * How hard Claude thinks before answering. "low" is noticeably faster and
+ * fine for swipe decks and random picks; weekly mix swaps use "medium".
+ */
+export type Effort = "low" | "medium";
+
+export async function curate(input: CurateInput, effort: Effort = "medium"): Promise<Picks> {
   const apiKey = await getSecret<string>(KEY_SECRET);
   if (!apiKey) throw new Error("Add your Claude key first.");
   let response: Anthropic.Message;
@@ -190,7 +196,7 @@ export async function curate(input: CurateInput): Promise<Picks> {
       model: MODEL,
       max_tokens: 16000,
       output_config: {
-        effort: "medium",
+        effort,
         format: { type: "json_schema", schema: PICKS_SCHEMA },
       },
       system: SYSTEM_PROMPT,

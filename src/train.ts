@@ -104,21 +104,24 @@ export async function buildDeck(
     spotify.getRecentlyPlayed(null).catch(() => ({ plays: [], complete: false })),
   ]);
   onProgress("Claude is picking songs to try…");
-  const picks = await curate({
-    mix: `Training deck: songs for the listener to judge one by one. At least ${DECK_SIZE - MAX_KNOWN_ARTISTS} must be songs they have very likely never heard, by artists NOT in top_artists or loved: lesser-known tracks and artists that fit their taste. At most ${MAX_KNOWN_ARTISTS} from artists they already know, and never their well-known hits. A varied spread with a few bolder wildcards`,
-    mode: "renew",
-    remove_count: 0,
-    // Extra picks, because known songs are filtered out afterwards.
-    add_count: DECK_SIZE + 8,
-    tune: { mood: 3, tempo: 3, energy: 3, fresh: 5, vocals: 3 },
-    loved: [...data.yes.slice(-15), ...topTracks.slice(0, 10)].map(ref),
-    blocked: data.no.slice(-150),
-    taste: buildTaste(data.history),
-    locked: [],
-    current: [],
-    top_artists: topArtists,
-    note: "",
-  });
+  const picks = await curate(
+    {
+      mix: `Training deck: songs for the listener to judge one by one. At least ${DECK_SIZE - MAX_KNOWN_ARTISTS} must be songs they have very likely never heard, by artists NOT in top_artists or loved: lesser-known tracks and artists that fit their taste. At most ${MAX_KNOWN_ARTISTS} from artists they already know, and never their well-known hits. A varied spread with a few bolder wildcards`,
+      mode: "renew",
+      remove_count: 0,
+      // Extra picks, because known songs are filtered out afterwards.
+      add_count: DECK_SIZE + 5,
+      tune: { mood: 3, tempo: 3, energy: 3, fresh: 5, vocals: 3 },
+      loved: [...data.yes.slice(-15), ...topTracks.slice(0, 10)].map(ref),
+      blocked: data.no.slice(-150),
+      taste: buildTaste(data.history),
+      locked: [],
+      current: [],
+      top_artists: topArtists,
+      note: "",
+    },
+    "low",
+  );
   onProgress("Finding them on Spotify…");
   const found = await spotify.findAll(picks.add);
   // Liked Songs is the strongest "I know this": check the found tracks against it.

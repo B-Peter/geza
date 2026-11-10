@@ -64,20 +64,23 @@ export async function prepareRandom(
 
   const trained = trainSignals(await loadTrain());
   onProgress("Claude is picking songs…");
-  const picks = await curate({
-    mix: "Random, for right now",
-    mode: "renew",
-    remove_count: 0,
-    add_count: RANDOM_SIZE,
-    tune: settings.tune,
-    loved: [...trained.loved, ...topTracks.map(ref)].slice(0, 40),
-    blocked: trained.blocked,
-    taste: trained.taste,
-    locked: [],
-    current: [],
-    top_artists: topArtists,
-    note: settings.note,
-  });
+  const picks = await curate(
+    {
+      mix: "Random, for right now",
+      mode: "renew",
+      remove_count: 0,
+      add_count: RANDOM_SIZE,
+      tune: settings.tune,
+      loved: [...trained.loved, ...topTracks.map(ref)].slice(0, 40),
+      blocked: trained.blocked,
+      taste: trained.taste,
+      locked: [],
+      current: [],
+      top_artists: topArtists,
+      note: settings.note,
+    },
+    "low",
+  );
 
   onProgress("Finding the songs on Spotify…");
   const { add } = filterAdditions(await spotify.findAll(picks.add), [], [], [], RANDOM_SIZE);
