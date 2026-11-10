@@ -80,6 +80,7 @@ async function logout() {
       </div>
     </a>
   </div>
+  <p class="small muted version">Version {__APP_VERSION__}</p>
 </main>
 
 <TabBar active="settings" />
@@ -88,6 +89,7 @@ async function logout() {
   .grow { flex: 1; min-width: 0; }
   .name { font-weight: 600; }
   .note a { text-decoration: underline; }
+  .version { margin: 14px 8px 0; text-align: center; }
   .note { margin: 8px 8px 0; }
   .ico { width: 34px; height: 34px; flex: none; border-radius: 11px; display: flex; align-items: center; justify-content: center; }
   .peach { background: #ffb08f; }

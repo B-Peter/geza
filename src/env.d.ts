@@ -7,3 +7,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Short commit and build time, injected by vite.config.ts. */
+declare const __APP_VERSION__: string;

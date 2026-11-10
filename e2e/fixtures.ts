@@ -186,7 +186,8 @@ export { expect };
 /** Wait until fonts are loaded and nothing is animating, then screenshot. */
 export async function snap(page: Page, name: string): Promise<void> {
   await page.evaluate(() => document.fonts.ready);
-  await expect(page).toHaveScreenshot(`${name}.png`);
+  // The version label changes with every build; keep it out of the comparison.
+  await expect(page).toHaveScreenshot(`${name}.png`, { mask: [page.locator(".version")] });
   if (process.env.SHOTS_DIR) {
     await page.screenshot({ path: `${process.env.SHOTS_DIR}/${name}.png` });
   }

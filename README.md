@@ -39,7 +39,8 @@ npm run check      # svelte-check (types)
 npm test           # Vitest
 npm run build      # outputs dist/
 npm run e2e        # Playwright: every screen on a phone viewport (installed Edge), screenshot baselines,
-                   # plus a production-build smoke test under the strict CSP
+                   # plus a production-build smoke test under the strict CSP, and a Safari (WebKit)
+                   # layout audit: no sideways overflow, no clipped text, 44px tap targets, 16px fields
 ```
 
 Locally, the app asks for the Spotify client ID on the welcome screen. To bake it in, put `VITE_SPOTIFY_CLIENT_ID=...` in `.env.local` (ignored by git).

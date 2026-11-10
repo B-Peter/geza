@@ -9,7 +9,7 @@ import TabBar from "../ui/TabBar.svelte";
 const status = (mix: Mix) =>
   app.pending[mix.id]
     ? "Swap ready"
-    : { keep: "Kept as is", tweak: "Tweaking weekly", renew: "Fresh every week" }[mix.mode];
+    : { keep: "Kept as is", tweak: "Tweaks weekly", renew: "Fresh weekly" }[mix.mode];
 
 const first = $derived(app.mixes[0]);
 </script>
@@ -40,11 +40,19 @@ const first = $derived(app.mixes[0]);
 <style>
   .grid { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .tile { position: relative; height: 176px; border-radius: 28px; overflow: hidden; }
-  .art { position: absolute; inset: 0 0 auto 0; height: 104px; }
+  /* Art and text never overlap: the text block is at most 42px tall and sits
+     below the art with room to spare. */
+  .art { position: absolute; inset: 0 0 auto 0; height: 92px; }
   .hit { position: absolute; inset: 0; }
   .meta { position: absolute; left: 14px; right: 64px; bottom: 14px; pointer-events: none; }
-  .name { font: 800 22px/24px var(--display); letter-spacing: -0.01em; }
-  .status { margin-top: 2px; font-size: 12px; line-height: 16px; font-weight: 600; opacity: 0.85; }
+  .name {
+    font: 800 22px/24px var(--display); letter-spacing: -0.01em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .status {
+    margin-top: 2px; font-size: 12px; line-height: 16px; font-weight: 600; opacity: 0.85;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%;
+  }
   .status.ready {
     display: inline-block; opacity: 1; background: var(--lime); color: var(--ink);
     padding: 1px 8px; border-radius: 10px;

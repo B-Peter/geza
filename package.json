@@ -13,7 +13,8 @@
     "e2e": "playwright test",
     "e2e:update": "playwright test --update-snapshots",
     "shots": "node scripts/shots.mjs",
-    "e2e:prod": "playwright test --project=prod"
+    "e2e:prod": "playwright test --project=prod",
+    "e2e:ci": "playwright test --project=prod --project=safari"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "1.7.0",

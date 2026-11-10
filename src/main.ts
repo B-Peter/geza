@@ -9,7 +9,22 @@ import { requestPersistence } from "./store.js";
 // GitHub Pages can't send X-Frame-Options or frame-ancestors, so refuse to
 // run inside another site's frame (clickjacking on Apply / Remove key).
 if (!framed()) {
-  registerSW({ immediate: true });
+  registerSW({
+    immediate: true,
+    // iOS keeps home-screen apps suspended rather than closed, so the browser's
+    // own update check can lag for a long time. Check on launch and whenever
+    // the app comes back to the foreground; autoUpdate then reloads into it.
+    onRegisteredSW(_url, registration) {
+      if (!registration) return;
+      const check = () => {
+        if (navigator.onLine) void registration.update().catch(() => {});
+      };
+      check();
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible") check();
+      });
+    },
+  });
   void requestPersistence();
   void app.init();
   const target = document.getElementById("app");

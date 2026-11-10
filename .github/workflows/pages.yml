@@ -36,10 +36,11 @@ jobs:
           # Public by design (PKCE, no client secret). Set it under
           # Settings → Secrets and variables → Actions → Variables.
           VITE_SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
-      # Production-build smoke test: pages load under the strict CSP with no
-      # console errors, and the CSP really blocks foreign connections.
-      - run: npx playwright install --with-deps chromium
-      - run: npm run e2e:prod
+      # Production-build smoke test (strict CSP, no console errors, no source
+      # maps) and the Safari layout audit (fits the width, no clipped text,
+      # 44px tap targets, 16px fields so iOS doesn't zoom).
+      - run: npx playwright install --with-deps chromium webkit
+      - run: npm run e2e:ci
         env:
           PW_CHANNEL: chromium
           # The smoke test rebuilds dist, which is what gets deployed below.

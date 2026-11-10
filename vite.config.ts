@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import type { Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
@@ -31,9 +32,24 @@ const csp = (): Plugin => ({
   ],
 });
 
+// Shown in the app, so it's easy to tell which build a phone is running.
+function appVersion(): string {
+  const sha =
+    process.env.GITHUB_SHA ??
+    (() => {
+      try {
+        return execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
+      } catch {
+        return "dev";
+      }
+    })();
+  return `${sha.slice(0, 7)} · ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
 export default defineConfig({
   // Relative base so the app works at https://<user>.github.io/<repo>/.
   base: "./",
+  define: { __APP_VERSION__: JSON.stringify(appVersion()) },
   plugins: [
     svelte(),
     csp(),
@@ -56,6 +72,10 @@ export default defineConfig({
         // The spike page and OAuth callbacks are never served from cache.
         navigateFallbackDenylist: [/spike\.html/, /[?&]code=/],
         cleanupOutdatedCaches: true,
+        // A new version takes over immediately instead of waiting until
+        // every window is closed (iOS home-screen apps rarely fully close).
+        skipWaiting: true,
+        clientsClaim: true,
       },
     }),
   ],

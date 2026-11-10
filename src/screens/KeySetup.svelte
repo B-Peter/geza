@@ -29,7 +29,7 @@ async function save() {
 
   <div class="label">Get a key</div>
   <ol class="card steps">
-    <li class="row"><span class="n">1</span>Sign in at&nbsp;<a href="https://console.anthropic.com" target="_blank" rel="noopener">console.anthropic.com</a></li>
+    <li class="row"><span class="n">1</span><span>Sign in at <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer">console.anthropic.com</a></span></li>
     <li class="row"><span class="n">2</span>Add credit and set a low spend limit</li>
     <li class="row"><span class="n">3</span>Create a key just for this app, paste it below</li>
   </ol>
@@ -50,7 +50,8 @@ async function save() {
   .title { margin-top: 14px; }
   .steps { list-style: none; margin: 0; padding: 0; }
   .steps li { font-weight: 600; }
-  .steps a { text-decoration: underline; }
+  /* Visually inline, but a 44px-tall tap area. */
+  .steps a { text-decoration: underline; display: inline-block; padding: 12px 0; margin: -12px 0; }
   .n {
     width: 28px; height: 28px; flex: none; border-radius: 50%;
     background: var(--ink); color: var(--lime);

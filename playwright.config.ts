@@ -30,7 +30,17 @@ export default defineConfig({
   },
   use: { trace: "retain-on-failure" },
   projects: [
-    { name: "iphone", testIgnore: /prod\.spec\.ts/, use: { ...phone, baseURL: "http://127.0.0.1:5199/" } },
+    {
+      name: "iphone",
+      testIgnore: /(prod|layout)\.spec\.ts/,
+      use: { ...phone, baseURL: "http://127.0.0.1:5199/" },
+    },
+    // Safari's engine (WebKit): iOS-only layout bugs don't show up in Chromium.
+    {
+      name: "safari",
+      testMatch: /layout\.spec\.ts/,
+      use: { ...devices["iPhone 13"], baseURL: "http://127.0.0.1:5199/" },
+    },
     { name: "prod", testMatch: /prod\.spec\.ts/, use: { ...phone, baseURL: "http://127.0.0.1:5198/" } },
   ],
   webServer: [
