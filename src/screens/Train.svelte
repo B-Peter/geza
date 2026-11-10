@@ -23,8 +23,15 @@ import Icon from "../ui/Icon.svelte";
 
 let data = $state<TrainData | null>(null);
 const IN_APP_KEY = "ps.trainInApp";
-/** Play with Spotify's embedded player on the card, not through the Spotify app. */
-let inApp = $state(localStorage.getItem(IN_APP_KEY) === "1");
+/**
+ * Play with Spotify's embedded player on the card (the default), not through
+ * the Spotify app, which iOS often keeps asleep.
+ */
+let inApp = $state(localStorage.getItem(IN_APP_KEY) !== "0");
+/** The embed for the current card is playing. */
+let embedPlaying = $state(false);
+/** The current card's embed didn't start on its own (the browser wants a tap). */
+let tapToPlay = $state(false);
 let deck = $state<Card[]>([]);
 /** The current deck's id (its "at"), for the Deck done stats. */
 let deckAt = $state(0);
@@ -61,7 +68,13 @@ const firstYear = $derived(
 );
 const statusLine = $derived(
   [
-    inApp ? "Playing inside Géza: tap ▶ on the card" : "",
+    inApp
+      ? embedPlaying
+        ? "Playing inside Géza"
+        : tapToPlay
+          ? "Tap ▶ on the card to start"
+          : "Starting…"
+      : "",
     startedIn !== null && device ? `Playing on ${device.name} · started in ${startedIn.toFixed(1)} s` : "",
     `${sessionYes} yes · ${sessionNo} no`,
   ]
@@ -105,7 +118,63 @@ const DEVICE_KEY = "ps.trainDevice";
 /** Plain words for what went wrong, above Spotify's own reply. */
 let hint = $state("");
 
-const embedUrl = (id: string) => `https://open.spotify.com/embed/track/${encodeURIComponent(id)}?theme=0`;
+const EMBED_ORIGIN = "https://open.spotify.com";
+const embedUrl = (id: string) => `${EMBED_ORIGIN}/embed/track/${encodeURIComponent(id)}?theme=0`;
+
+// --- The embedded player -----------------------------------------------------
+// Spotify's embed speaks a small postMessage protocol (the one its iFrame API
+// uses): it says {type:"ready"}, takes {command:"play"} and {command:"seek"},
+// and reports {type:"playback_update", payload:{isPaused, position, duration}}.
+let embedEl = $state<HTMLIFrameElement | null>(null);
+/** Seeked to the catchy part already (full songs only, not 30-second previews). */
+let embedSeeked = false;
+let tapTimer: ReturnType<typeof setTimeout> | undefined;
+
+const toEmbed = (message: Record<string, unknown>) =>
+  embedEl?.contentWindow?.postMessage(message, EMBED_ORIGIN);
+
+$effect(() => {
+  const onMessage = (e: MessageEvent) => {
+    if (e.origin !== EMBED_ORIGIN || !embedEl || e.source !== embedEl.contentWindow) return;
+    const data = e.data as { type?: string; payload?: { isPaused?: boolean; duration?: number } } | null;
+    if (data?.type === "ready") {
+      toEmbed({ command: "load_complete_ack" });
+      toEmbed({ command: "play" });
+      clearTimeout(tapTimer);
+      // Still silent after a moment: the browser wants a tap on the player.
+      tapTimer = setTimeout(() => {
+        if (!embedPlaying) tapToPlay = true;
+      }, 2500);
+    }
+    if (data?.type === "playback_update" || data?.type === "playback_started") {
+      const p = data.payload ?? {};
+      embedPlaying = p.isPaused === false || data.type === "playback_started";
+      if (embedPlaying) {
+        tapToPlay = false;
+        playingSince ??= Date.now();
+      }
+      // Full songs start at their catchy part; 30-second previews from the top.
+      const current = deck[index];
+      if (embedPlaying && !embedSeeked && current && (p.duration ?? 0) > 60_000) {
+        embedSeeked = true;
+        toEmbed({ command: "seek", timestamp: Math.round(startPosition(current.track) / 1000) });
+      }
+    }
+  };
+  addEventListener("message", onMessage);
+  return () => {
+    removeEventListener("message", onMessage);
+    clearTimeout(tapTimer);
+  };
+});
+
+/** A new card's embed is loading: reset its state. */
+function embedFor(_id: string) {
+  embedPlaying = false;
+  tapToPlay = false;
+  embedSeeked = false;
+  clearTimeout(tapTimer);
+}
 
 function chooseInApp() {
   inApp = true;
@@ -115,7 +184,9 @@ function chooseInApp() {
   choosing = false;
   blocked = null;
   noSound = false;
-  playingSince = Date.now();
+  playingSince = null;
+  const current = deck[index];
+  if (current) embedFor(current.track.id);
 }
 /** All Spotify devices, for the picker. */
 let devices = $state<spotify.Device[]>([]);
@@ -148,7 +219,7 @@ async function findDevice(): Promise<boolean> {
 
 function choose(d: spotify.Device) {
   inApp = false;
-  localStorage.removeItem(IN_APP_KEY);
+  localStorage.setItem(IN_APP_KEY, "0");
   device = d;
   localStorage.setItem(DEVICE_KEY, d.id);
   choosing = false;
@@ -187,8 +258,9 @@ async function playFrom(i: number) {
   const current = deck[i];
   if (!current) return;
   if (inApp) {
-    // The embedded player on the card does the playing; you tap it.
-    playingSince = Date.now();
+    // The embedded player on the card does the playing (see the embed section).
+    playingSince = null;
+    embedFor(current.track.id);
     return;
   }
   if (!device) return;
@@ -429,13 +501,16 @@ $effect(() => {
       >
         <div class="art" class:embedded={inApp}>
           {#if inApp}
-            <iframe
-              class="embed"
-              title={`Play ${card.track.title} by ${card.track.artist}`}
-              src={embedUrl(card.track.id)}
-              allow="encrypted-media; autoplay; clipboard-write"
-              loading="eager"
-            ></iframe>
+            {#key card.track.id}
+              <iframe
+                class="embed"
+                title={`Play ${card.track.title} by ${card.track.artist}`}
+                src={embedUrl(card.track.id)}
+                allow="encrypted-media; autoplay; clipboard-write"
+                loading="eager"
+                bind:this={embedEl}
+              ></iframe>
+            {/key}
           {:else if card.track.image}
             <img src={card.track.image} alt="" draggable="false" />
           {:else}

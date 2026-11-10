@@ -67,6 +67,14 @@ const TOP_TRACKS: Record<string, unknown[]> = {
 type FakeDevice = { id: string; name: string; type: string; is_active: boolean };
 const PHONE: FakeDevice = { id: "phone1", name: "iPhone", type: "Smartphone", is_active: true };
 
+/** The embedded player stand-in: does it start when told to play? */
+export const embed = {
+  autoplay: true,
+  reset() {
+    this.autoplay = true;
+  },
+};
+
 /** Playlists in the tester's Spotify library (none by default). */
 export const library = {
   playlists: [] as { id: string; name: string; tracks: unknown[] }[],
@@ -290,9 +298,22 @@ export async function mockApis(page: Page): Promise<void> {
     return json(url.pathname === "/ws/2/artist" ? { artists: [] } : { "release-groups": [] });
   });
 
-  // Spotify's embedded player: a blank page stands in for it.
+  // Spotify's embedded player: a stand-in that speaks the same postMessage
+  // protocol (ready → play → playback_update). `embed.autoplay` = false acts
+  // like a browser that blocks autoplay.
   await page.route(/^https:\/\/open\.spotify\.com\//, (route) =>
-    route.fulfill({ contentType: "text/html", body: "<!doctype html><title>embed</title>" }),
+    route.fulfill({
+      contentType: "text/html",
+      body: `<!doctype html><title>embed</title><button id="p">play</button><script>
+        const tell = (m) => parent.postMessage(m, "*");
+        const playing = () => tell({ type: "playback_update", payload: { isPaused: false, position: 0, duration: 30000 } });
+        addEventListener("message", (e) => {
+          if (e.data && e.data.command === "play" && ${embed.autoplay}) playing();
+        });
+        document.getElementById("p").onclick = playing;
+        tell({ type: "ready" });
+      </script>`,
+    }),
   );
 
   // Fail loudly if anything else tries to reach the internet.
@@ -312,6 +333,8 @@ export interface SeedOptions {
   pendingSwap?: boolean;
   /** A login from before Géza asked for the listening permissions. */
   oldLogin?: boolean;
+  /** Train plays through the Spotify app instead of the embedded player. */
+  spotifyApp?: boolean;
 }
 
 export const ALL_SCOPES =
@@ -328,6 +351,8 @@ export async function seed(page: Page, opts: SeedOptions): Promise<void> {
       const store = await load("/src/store.ts");
       const mixes = await load("/src/mixes.ts");
       localStorage.setItem("ps.spotifyClientId", "test-client-id");
+      if (o.spotifyApp) localStorage.setItem("ps.trainInApp", "0");
+      else localStorage.removeItem("ps.trainInApp");
       if (o.loggedIn) {
         await store.setSecret("spotifyTokens", {
           access_token: "test-access",
@@ -395,6 +420,7 @@ export const test = base.extend<{ errors: string[] }>({
       // Fresh fake Spotify app for every test.
       player.reset();
       library.reset();
+      embed.reset();
       await mockApis(page);
       await use(errors);
     },

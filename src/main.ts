@@ -5,6 +5,7 @@ import App from "./App.svelte";
 import { framed } from "./frame-guard.js";
 import { app } from "./state.svelte.js";
 import { requestPersistence } from "./store.js";
+import { updateMessage } from "./whatsNew.js";
 
 // GitHub Pages can't send X-Frame-Options or frame-ancestors, so refuse to
 // run inside another site's frame (clickjacking on Apply / Remove key).
@@ -26,7 +27,10 @@ if (!framed()) {
     },
   });
   void requestPersistence();
-  void app.init();
+  void app.init().then(() => {
+    const news = updateMessage(__APP_VERSION__);
+    if (news) app.notify(news, "ok", 9000);
+  });
   const target = document.getElementById("app");
   if (target) mount(App, { target });
 }

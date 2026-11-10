@@ -169,7 +169,7 @@ class AppState {
     await this.setMixes(this.mixes.map((m) => (m.id === id ? { ...m, ...patch } : m)));
   }
 
-  notify(message: unknown, kind: Toast["kind"] = "error"): void {
+  notify(message: unknown, kind: Toast["kind"] = "error", ms?: number): void {
     if (message instanceof SessionExpiredError) {
       // Tokens are already deleted; show Welcome so the user can log in again.
       this.loggedIn = false;
@@ -183,7 +183,7 @@ class AppState {
       () => {
         if (this.toast === current) this.toast = null;
       },
-      kind === "error" ? 8000 : 3000,
+      ms ?? (kind === "error" ? 8000 : 3000),
     );
   }
 
