@@ -60,8 +60,13 @@ export interface Deck {
   asked: number;
   found: number;
   ms: DeckTiming;
-  /** The rest of the deck, still on its way (the deck starts with the first batch). */
+  /** The rest of the deck, still on its way (the deck starts with its first cards). */
   rest?: Promise<Card[]>;
+  /**
+   * Hear about each further card the moment it is found, instead of waiting
+   * for the whole rest: cards found before you asked come first, in order.
+   */
+  onCard?: (listener: (card: Card) => void) => void;
 }
 
 export interface TrainData {
@@ -320,8 +325,8 @@ const BATCHES: { focus: DeckFocus; count: number }[] = [
   { focus: "adjacent", count: 7 },
   { focus: "wildcard", count: 5 },
 ];
-/** The deck starts as soon as it has this many cards. */
-const FIRST_CARDS = 3;
+/** The deck starts as soon as it has this many cards: one to play, one to swipe to. */
+export const FIRST_CARDS = 2;
 
 type LookedUp = ArtistResolved & { known: Known };
 
@@ -370,6 +375,13 @@ export async function buildDeck(
     enough = resolve;
   });
   const limit = limiter(6);
+  // Cards found after the deck was handed over go to whoever listens (onCard).
+  let at = 0;
+  const listeners: ((card: Card) => void)[] = [];
+  const announce = (list: Card[]) => {
+    if (!at) return;
+    for (const c of list) for (const l of listeners) l({ ...c, deck: at });
+  };
 
   /** One artist's songs, and which of them the listener already knows. */
   const lookUp = async (pick: ArtistPick): Promise<LookedUp> => {
@@ -384,7 +396,9 @@ export async function buildDeck(
   const deal = ({ pick, tracks, known }: LookedUp) => {
     stats.asked++;
     if (tracks.length > 0) stats.found++;
-    cards.push(...deckFromArtists([{ pick, tracks }], judgedData, known, cards));
+    const fresh = deckFromArtists([{ pick, tracks }], judgedData, known, cards);
+    cards.push(...fresh);
+    announce(fresh);
     if (cards.length >= FIRST_CARDS) enough();
   };
   /** One answer from Claude: lookups run side by side, cards are dealt in Claude's order. */
@@ -404,7 +418,7 @@ export async function buildDeck(
   const all = Promise.all(BATCHES.map(batch));
   await Promise.race([firstCards, all]);
 
-  const at = Date.now();
+  at = Date.now();
   const tag = (list: Card[]) => list.map((c) => ({ ...c, deck: at }));
   const first = tag(cards);
   const t3 = performance.now();
@@ -427,6 +441,7 @@ export async function buildDeck(
         if (artists.has(firstArtist(c.track.artist))) continue;
         artists.add(firstArtist(c.track.artist));
         cards.push(c);
+        announce([c]);
       }
     }
     deck.asked = stats.asked;
@@ -439,6 +454,10 @@ export async function buildDeck(
     return { ...deck, cards: restCards, asked: stats.asked, found: stats.found };
   }
   deck.rest = finish();
+  deck.onCard = (listener) => {
+    for (const c of tag(cards.slice(first.length))) listener(c);
+    listeners.push(listener);
+  };
   return deck;
 }
 

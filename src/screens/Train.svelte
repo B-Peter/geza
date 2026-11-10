@@ -35,6 +35,8 @@ let deckAt = $state(0);
 let deckPlaylist = $state<string | null>(null);
 /** Resolves once the deck playlist is filled (or failed; then plain song lists are used). */
 let deckPlaylistReady: Promise<void> = Promise.resolve();
+/** Cards that arrived later, being added to the deck playlist in order. */
+let playlistWrites: Promise<void> = Promise.resolve();
 let index = $state(0);
 let device = $state<spotify.Device | null>(null);
 /** "spotify": Spotify isn't running or is asleep; "premium": playback needs Premium. */
@@ -52,13 +54,16 @@ let more = $state(false);
 /** MusicBrainz details per track id, filled in the background. */
 let details = $state<Record<string, Enrichment>>({});
 
-/** Enrich the deck from the current card onwards, one song at a time. */
-async function enrichDeck(cards: Card[]) {
-  for (const c of cards) {
-    if (details[c.track.id]) continue;
-    const e = await enrich(c.track);
-    details[c.track.id] = e;
-  }
+/** One MusicBrainz lookup at a time, also when cards keep arriving. */
+let enriching: Promise<void> = Promise.resolve();
+/** Enrich cards in the background, one song at a time. */
+function enrichDeck(cards: Card[]) {
+  enriching = enriching.then(async () => {
+    for (const c of cards) {
+      if (details[c.track.id]) continue;
+      details[c.track.id] = await enrich(c.track).catch(() => ({ genres: [] }));
+    }
+  });
 }
 
 const card = $derived(deck[index] ?? null);
@@ -190,6 +195,8 @@ async function playFrom(i: number) {
   hint = "";
   const t0 = performance.now();
   await deckPlaylistReady;
+  // A card that just arrived must be in the playlist before Spotify can play it there.
+  await playlistWrites;
   if (token !== playToken) return;
   try {
     if (deckPlaylist) {
@@ -273,31 +280,35 @@ function prepareDeckPlaylist(cards: Card[]) {
     .catch(() => {});
 }
 
-/** The rest of the deck arrived: add it to the cards and to the playlist, in order. */
+/**
+ * The deck keeps growing while you listen: each card joins the moment it is
+ * found, and goes into the deck playlist behind the ones before it.
+ */
 function addRest(built: Deck, at: number) {
   more = true;
-  void built.rest
-    ?.then(async (extraCards) => {
-      if (deckAt !== at) return;
-      const have = new Set(deck.map((c) => songKey(c.track.artist, c.track.title)));
-      const fresh = extraCards.filter((c) => !have.has(songKey(c.track.artist, c.track.title)));
-      const room = Math.max(0, DECK_SIZE - deck.length);
-      const added = fresh.slice(0, room);
-      if (!added.length) return;
+  const add = (c: Card) => {
+    if (deckAt !== at || deck.length >= DECK_SIZE) return;
+    const key = songKey(c.track.artist, c.track.title);
+    if (deck.some((d) => songKey(d.track.artist, d.track.title) === key)) return;
+    // You already swiped past the last card and are waiting for this one.
+    const waiting = index >= deck.length && !leaving;
+    deck = [...deck, c];
+    enrichDeck([c]);
+    playlistWrites = playlistWrites.then(async () => {
       await deckPlaylistReady;
-      if (deckPlaylist) {
-        await spotify
-          .addToPlaylist(
-            deckPlaylist,
-            added.map((c) => c.track.uri),
-          )
-          .catch(() => {});
-      }
-      deck = [...deck, ...added];
-      void enrichDeck(added);
+      if (deckPlaylist && deckAt === at)
+        await spotify.addToPlaylist(deckPlaylist, [c.track.uri]).catch(() => {});
+    });
+    if (waiting && device && !blocked) void playFrom(index);
+  };
+  built.onCard?.(add);
+  void built.rest
+    ?.then((extraCards) => {
+      for (const c of extraCards) add(c);
     })
     .catch(() => {})
     .finally(async () => {
+      await playlistWrites;
       if (deckAt !== at) return;
       more = false;
       if (data) data = await recordDeck($state.snapshot(data) as TrainData, { ...built, cards: deck });
@@ -310,18 +321,20 @@ function addRest(built: Deck, at: number) {
 async function start() {
   if (!data) return;
   const current = $state.snapshot(data) as TrainData;
+  // Find where to play while the deck is being built, not after.
+  const deviceFound = findDevice();
   const built = await app.task("Starting…", (progress) => takeDeck(current, progress));
   if (!built) return;
   deck = built.cards;
   deckAt = built.at;
   prepareDeckPlaylist(built.cards);
-  void enrichDeck(built.cards);
+  enrichDeck(built.cards);
   index = 0;
   sessionYes = 0;
   sessionNo = 0;
   if (built.rest) addRest(built, built.at);
   else data = await recordDeck(current, built);
-  if (await findDevice()) void wakeAndPlay(0);
+  if (await deviceFound) void wakeAndPlay(0);
 }
 
 async function retrySpotify() {
