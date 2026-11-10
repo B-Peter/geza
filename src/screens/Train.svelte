@@ -149,10 +149,7 @@ function decide(verdict: Verdict) {
   if (next < deck.length) void playFrom(next);
   else if (device) void spotify.pause(device.id).catch(() => {});
   const extra = $state.snapshot(details[judged.track.id] ?? { genres: [] }) as Enrichment;
-  void judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell, extra).then((d) => {
-    data = d;
-    void app.refreshGeza();
-  });
+  void judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell, extra).then((d) => (data = d));
   setTimeout(() => {
     index = next;
     leaving = null;

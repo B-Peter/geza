@@ -46,12 +46,6 @@ const SCREENS: Screen[] = [
     ready: (p) => p.getByText("Linked as Peter").waitFor(),
   },
   { name: "random", seed: all, path: "./#/random", ready: (p) => p.getByText("Start from").waitFor() },
-  {
-    name: "level-up",
-    seed: { ...all, swipes: 30 },
-    path: "./#/",
-    ready: (p) => p.getByRole("dialog", { name: "LEVEL UP!" }).waitFor(),
-  },
   { name: "train", seed: all, path: "./#/train", ready: (p) => p.getByText("Swipe right: keep").waitFor() },
   {
     name: "train-card",

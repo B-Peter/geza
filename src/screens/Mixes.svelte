@@ -4,7 +4,6 @@ import * as spotify from "../spotify.js";
 import { openUri } from "../spotify.js";
 import { app } from "../state.svelte.js";
 import Cover from "../ui/Cover.svelte";
-import GezaCard from "../ui/GezaCard.svelte";
 import Icon from "../ui/Icon.svelte";
 import TabBar from "../ui/TabBar.svelte";
 
@@ -17,7 +16,6 @@ const first = $derived(app.mixes[0]);
 </script>
 
 <main class="screen">
-  {#if app.geza}<GezaCard info={app.geza} taste={app.taste} />{/if}
   <h1>Mixes</h1>
   {#if first}<p class="lead">Say: “Hey Siri, play {first.playlistName} on Spotify”</p>{/if}
 

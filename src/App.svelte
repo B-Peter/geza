@@ -9,7 +9,6 @@ import Setup from "./screens/Setup.svelte";
 import Train from "./screens/Train.svelte";
 import Welcome from "./screens/Welcome.svelte";
 import { app } from "./state.svelte.js";
-import LevelUp from "./ui/LevelUp.svelte";
 import Loader from "./ui/Loader.svelte";
 </script>
 
@@ -33,10 +32,6 @@ import Loader from "./ui/Loader.svelte";
   <Settings />
 {:else}
   <Mixes />
-{/if}
-
-{#if app.levelUp && app.geza}
-  <LevelUp level={app.levelUp} xp={app.geza.xp} onclose={() => app.dismissLevelUp()} />
 {/if}
 
 {#if app.busy}

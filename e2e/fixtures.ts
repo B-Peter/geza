@@ -222,8 +222,6 @@ export interface SeedOptions {
   pendingSwap?: boolean;
   /** A login from before Géza asked for the listening permissions. */
   oldLogin?: boolean;
-  /** This many past Train swipes (each is 1 XP for Géza). */
-  swipes?: number;
 }
 
 export const ALL_SCOPES =
@@ -249,17 +247,6 @@ export async function seed(page: Page, opts: SeedOptions): Promise<void> {
         });
       }
       if (o.claudeKey) await store.setSecret("anthropicKey", "sk-ant-test-0000000000004f2a");
-      if (o.swipes) {
-        const history = Array.from({ length: o.swipes }, (_, i) => ({
-          artist: `Artist ${i}`,
-          title: `Song ${i}`,
-          verdict: i % 3 === 0 ? "no" : "yes",
-          tags: i % 3 === 0 ? ["ballad"] : ["indie rock"],
-          dwellMs: 4_000,
-          at: i,
-        }));
-        await store.set("train", { yes: [], no: [], playlistId: null, history });
-      }
       const list = mixes
         .defaultMixes()
         .map((m: { id: string }) => ({ ...m, playlistId: o.playlists ? `pl-${m.id}` : null }));
