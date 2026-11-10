@@ -5,13 +5,30 @@ import { loadRandom, prepareRandom, RANDOM_SIZE, type RandomSettings, saveRandom
 import * as spotify from "../spotify.js";
 import { openUri } from "../spotify.js";
 import { app } from "../state.svelte.js";
+import { type Card, judge, loadTrain, type TrainData, type Verdict } from "../train.js";
 import BackButton from "../ui/BackButton.svelte";
 import Icon from "../ui/Icon.svelte";
 import Radar from "../ui/Radar.svelte";
 
 let settings = $state<RandomSettings | null>(null);
 /** Set after a successful pick; cleared when the graph or note changes. */
-let ready = $state<{ found: number; picked: number } | null>(null);
+let ready = $state<{ found: number; picked: number; songs: Card[] } | null>(null);
+/** Your verdict per track id, for the list below the picks. */
+let verdicts = $state<Record<string, Verdict>>({});
+let train = $state<TrainData | null>(null);
+
+/** A yes or no here teaches Géza exactly like a swipe in Train. */
+async function rate(card: Card, verdict: Verdict) {
+  if (verdicts[card.track.id]) return;
+  verdicts[card.track.id] = verdict;
+  train ??= await loadTrain();
+  train = await judge(
+    $state.snapshot(train) as TrainData,
+    $state.snapshot(card) as Card,
+    verdict,
+    app.profile,
+  );
+}
 
 $effect(() => {
   void loadRandom().then((s) => (settings = s));
@@ -36,7 +53,8 @@ async function pick() {
   });
   if (result) {
     settings = result.settings;
-    ready = { found: result.found, picked: result.picked };
+    ready = { found: result.found, picked: result.picked, songs: result.songs };
+    verdicts = {};
   }
 }
 </script>
@@ -74,6 +92,24 @@ async function pick() {
       />
     </div>
   {/if}
+
+  {#if ready}
+    <div class="label">In “Studio Random” · {ready.songs.length}</div>
+    <div class="card">
+      {#each ready.songs as song (song.track.id)}
+        {@const v = verdicts[song.track.id]}
+        <div class="row pick">
+          <div class="grow">
+            <div class="title">{song.track.title}</div>
+            <div class="small muted">{song.track.artist} · {song.reason}</div>
+          </div>
+          <button class="rate no" class:on={v === "no"} disabled={!!v} aria-label={`No: ${song.track.title}`} onclick={() => rate(song, "no")}>✕</button>
+          <button class="rate yes" class:on={v === "yes"} disabled={!!v} aria-label={`Yes: ${song.track.title}`} onclick={() => rate(song, "yes")}>♥</button>
+        </div>
+      {/each}
+    </div>
+    <p class="small muted none">A yes or no here counts like a swipe in Train.</p>
+  {/if}
 </main>
 
 <div class="actions">
@@ -106,4 +142,15 @@ async function pick() {
   .notebox label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; margin-bottom: 10px; }
   .center { text-align: center; margin: 0 0 10px; }
   .two { display: grid; grid-template-columns: 1fr 1.3fr; gap: 10px; }
+  .pick .grow { flex: 1; min-width: 0; }
+  .pick .title { font-size: 14px; line-height: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rate {
+    width: 44px; height: 44px; flex: none; border-radius: 50%; border: 1.5px solid var(--line);
+    background: var(--white); font-size: 18px; cursor: pointer;
+  }
+  .rate.no { color: var(--danger); }
+  .rate.yes.on { background: var(--lime); border-color: var(--ink); }
+  .rate.no.on { background: #ffe3d6; border-color: var(--danger); }
+  .rate:disabled:not(.on) { opacity: 0.35; }
+  .none { margin: 8px 8px 0; }
 </style>

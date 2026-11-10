@@ -7,7 +7,7 @@ import type { Profile, Track } from "./spotify.js";
 import * as spotify from "./spotify.js";
 import * as store from "./store.js";
 import { filterAdditions } from "./swap.js";
-import { loadTrain, trainSignals } from "./train.js";
+import { type Card, loadTrain, trainSignals } from "./train.js";
 
 export const RANDOM_PLAYLIST = "Studio Random";
 export const RANDOM_SIZE = 20;
@@ -23,6 +23,8 @@ export interface RandomResult {
   settings: RandomSettings;
   picked: number;
   found: number;
+  /** What went into the playlist, in order, with Claude's reasons and tags. */
+  songs: Card[];
 }
 
 const KEY = "random";
@@ -83,9 +85,16 @@ export async function prepareRandom(
   );
 
   onProgress("Finding the songs on Spotify…");
-  const { add } = filterAdditions(await spotify.findAll(picks.add), [], [], [], RANDOM_SIZE);
+  const resolved = await spotify.findAll(picks.add);
+  const { add } = filterAdditions(resolved, [], [], [], RANDOM_SIZE);
   if (add.length === 0) throw new Error("None of Claude's picks were found on Spotify. Try again.");
   const uris = add.map((a) => (a.track as Track).uri);
+  const tagsOf = new Map(resolved.map((r) => [r.track?.id ?? "", (r.pick.tags ?? []).slice(0, 4)]));
+  const songs: Card[] = add.map((a) => ({
+    track: a.track,
+    reason: a.reason,
+    tags: tagsOf.get(a.track.id) ?? [],
+  }));
 
   onProgress("Filling the playlist…");
   let playlistId = settings.playlistId ?? (await createRandomPlaylist(profile));
@@ -100,5 +109,5 @@ export async function prepareRandom(
 
   const next = { ...settings, playlistId };
   await saveRandom(next);
-  return { settings: next, picked: picks.add.length, found: add.length };
+  return { settings: next, picked: picks.add.length, found: add.length, songs };
 }

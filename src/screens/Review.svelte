@@ -1,7 +1,8 @@
 <script lang="ts">
-import { clearPending, type MixId, type SwapEntry } from "../mixes.js";
+import { clearPending, type MixId, type SwapEntry, savePending } from "../mixes.js";
 import { applyPending } from "../prepare.js";
 import { app, go } from "../state.svelte.js";
+import { addBlocked } from "../swap.js";
 import BackButton from "../ui/BackButton.svelte";
 import Icon from "../ui/Icon.svelte";
 
@@ -24,10 +25,37 @@ async function apply() {
     applyPending($state.snapshot(mix) as typeof mix, $state.snapshot(swap) as typeof swap),
   );
   if (!updated) return;
-  await app.updateMix(id, { lastAppliedAt: updated.lastAppliedAt, blocked: updated.blocked });
+  await app.updateMix(id, {
+    lastAppliedAt: updated.lastAppliedAt,
+    blocked: updated.blocked,
+    reasons: updated.reasons,
+  });
   delete app.pending[id];
   app.notify(`${mix.name} updated in Spotify.`, "ok");
   go(`/mix/${id}`);
+}
+
+/** Keep the old song after all: it's taken out of the swap and locked. */
+async function keepOld(entry: SwapEntry) {
+  if (!swap) return;
+  const next = { ...$state.snapshot(swap), remove: swap.remove.filter((r) => r.track.id !== entry.track.id) };
+  app.pending[id] = next as typeof swap;
+  await savePending($state.snapshot(next) as typeof swap);
+  const track = $state.snapshot(entry.track);
+  if (!mix.locked.some((t) => t.id === track.id)) {
+    await app.updateMix(id, { locked: [...$state.snapshot(mix.locked), track] });
+  }
+}
+
+/** Not this new song: it's dropped from the swap and never suggested for this mix again. */
+async function vetoNew(entry: SwapEntry) {
+  if (!swap) return;
+  const next = { ...$state.snapshot(swap), add: swap.add.filter((a) => a.track.id !== entry.track.id) };
+  app.pending[id] = next as typeof swap;
+  await savePending($state.snapshot(next) as typeof swap);
+  await app.updateMix(id, {
+    blocked: addBlocked($state.snapshot(mix.blocked), [$state.snapshot(entry.track)]),
+  });
 }
 
 async function discard() {
@@ -43,7 +71,8 @@ async function discard() {
   <h1>Weekly swap</h1>
   {#if swap}
     <p class="lead">
-      {mix.name} · {swap.remove.length} out, {swap.add.length} in. Locked songs stay.
+      {mix.name} · {swap.remove.length} out, {swap.add.length} in. Locked songs stay. Tap Keep or Skip to change
+      Claude's mind on any row.
     </p>
     <span class="chip found">
       <Icon name="sparkle" size={15} />
@@ -58,6 +87,7 @@ async function discard() {
               <div class="title">{r.out.track.title}</div>
               <div class="small muted">{r.out.track.artist} · {r.out.reason}</div>
             </div>
+            <button class="veto" aria-label={`Keep ${r.out.track.title}`} onclick={() => keepOld(r.out as SwapEntry)}>Keep</button>
             <span class="arrow"><Icon name="arrow" size={14} /></span>
           {/if}
           {#if r.in}
@@ -65,6 +95,7 @@ async function discard() {
               <div class="title">{r.in.track.title}</div>
               <div class="small muted">{r.in.track.artist} · {r.in.reason}</div>
             </div>
+            <button class="veto" aria-label={`Skip ${r.in.track.title}`} onclick={() => vetoNew(r.in as SwapEntry)}>Skip</button>
           {/if}
         </div>
       {/each}
@@ -89,11 +120,15 @@ async function discard() {
   .found { margin-top: 12px; }
   .list { margin-top: 12px; }
   .pair {
-    display: grid; grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr);
-    gap: 8px; align-items: center; padding: 10px 14px;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto 24px minmax(0, 1fr) auto;
+    gap: 6px; align-items: center; padding: 6px 10px 6px 14px;
   }
   .pair + .pair { border-top: 1px solid var(--line); }
-  .pair.fill { grid-template-columns: minmax(0, 1fr); }
+  .pair.fill { grid-template-columns: minmax(0, 1fr) auto; }
+  .veto {
+    min-width: 44px; min-height: 44px; padding: 0 8px; border: 1.5px solid var(--line); border-radius: 14px;
+    background: var(--white); font-size: 12px; font-weight: 700; cursor: pointer;
+  }
   .song { min-width: 0; }
   .out { opacity: 0.55; }
   .out .title { text-decoration: line-through; }

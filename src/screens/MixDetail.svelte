@@ -144,6 +144,7 @@ async function undo() {
               <div class="small muted">
                 {t.artist}{#if badge(ledger?.entries[t.id], now)}<span class="badge"> · {badge(ledger?.entries[t.id], now)}</span>{/if}
               </div>
+              {#if mix.reasons?.[t.id]}<div class="small why"><Icon name="sparkle" size={12} />{mix.reasons[t.id]}</div>{/if}
             </div>
             <button
               class="lock"
@@ -177,6 +178,7 @@ async function undo() {
 </div>
 
 <style>
+  .why { display: flex; align-items: center; gap: 4px; margin-top: 2px; color: var(--ink); opacity: 0.8; }
   .page { max-width: 520px; margin: 0 auto; padding-bottom: calc(120px + var(--safe-bottom)); }
   .hero { position: relative; height: calc(214px + var(--safe-top)); border-radius: 0 0 36px 36px; overflow: hidden; }
   .art { position: absolute; inset: 0 0 auto 0; height: calc(148px + var(--safe-top)); }

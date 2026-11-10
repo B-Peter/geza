@@ -13,6 +13,7 @@ export type Route =
   | { name: "settings" }
   | { name: "random" }
   | { name: "train" }
+  | { name: "taste" }
   | { name: "key" };
 
 const MIX_IDS: MixId[] = ["driving", "working", "cooking", "home"];
@@ -25,6 +26,7 @@ function parseRoute(hash: string): Route {
   if (name === "settings") return { name: "settings" };
   if (name === "random") return { name: "random" };
   if (name === "train") return { name: "train" };
+  if (name === "taste") return { name: "taste" };
   if (name === "key") return { name: "key" };
   return { name: "mixes" };
 }
@@ -81,13 +83,33 @@ class AppState {
     }
     this.#learning ??= (async () => {
       try {
-        const { mixes, summary } = await learnFromSpotify($state.snapshot(this.mixes) as Mix[]);
-        // Take only what learning changes, so edits made meanwhile survive.
+        const before = $state.snapshot(this.mixes) as Mix[];
+        const { mixes, summary } = await learnFromSpotify(before);
+        // Apply only what learning changed (as a diff against the snapshot),
+        // so locks and blocks you set meanwhile survive.
         const byId = new Map(mixes.map((m) => [m.id, m]));
+        const wasById = new Map(before.map((m) => [m.id, m]));
         await this.setMixes(
           this.mixes.map((m) => {
             const learned = byId.get(m.id);
-            return learned ? { ...m, locked: learned.locked, blocked: learned.blocked } : m;
+            const was = wasById.get(m.id);
+            if (!learned || !was) return m;
+            const wasLocked = new Set(was.locked.map((t) => t.id));
+            const nowLocked = new Set(learned.locked.map((t) => t.id));
+            const unlocked = new Set([...wasLocked].filter((id) => !nowLocked.has(id)));
+            const current = $state.snapshot(m) as Mix;
+            const locked = [
+              ...current.locked.filter((t) => !unlocked.has(t.id)),
+              ...learned.locked.filter(
+                (t) => !wasLocked.has(t.id) && !current.locked.some((c) => c.id === t.id),
+              ),
+            ];
+            const blockedKeys = new Set(current.blocked.map((b) => `${b.artist}|${b.title}`));
+            const blocked = [
+              ...current.blocked,
+              ...learned.blocked.filter((b) => !blockedKeys.has(`${b.artist}|${b.title}`)),
+            ];
+            return { ...m, locked, blocked };
           }),
         );
         this.learned = summary;

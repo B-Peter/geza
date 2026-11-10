@@ -20,6 +20,8 @@ export interface Mix {
   /** Removed tracks are never suggested again. */
   blocked: { artist: string; title: string }[];
   lastAppliedAt: number | null;
+  /** Why Claude put each song in (by track id), for songs it added. */
+  reasons?: Record<string, string>;
 }
 
 export interface SwapEntry {

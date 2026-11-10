@@ -211,3 +211,122 @@ test("loading animation stays still with Reduce Motion", async ({ page }) => {
   await expect(bar).toBeVisible();
   expect(await bar.evaluate((el) => getComputedStyle(el).animationName)).toBe("none");
 });
+
+test("flow: change Claude's mind on a swap row, and the reasons stay with the songs", async ({ page }) => {
+  await seed(page, { loggedIn: true, claudeKey: true, playlists: true, pendingSwap: true });
+  await open(page, "./#/review/driving");
+  // Keep Blue Hour after all: it leaves the swap and gets locked.
+  await page.getByRole("button", { name: "Keep Blue Hour" }).click();
+  await expect(page.getByText("Blue Hour")).toHaveCount(0);
+  // Not Open Window: it leaves the swap and is never suggested for Driving again.
+  await page.getByRole("button", { name: "Skip Open Window" }).click();
+  await expect(page.getByText("Open Window")).toHaveCount(0);
+  await expect(page.getByText(/1 out, 1 in/)).toBeVisible();
+
+  const write = page.waitForRequest((r) => r.method() === "PUT" && r.url().includes("/items"));
+  await page.getByRole("button", { name: "Apply" }).click();
+  const body = (await write).postDataJSON() as { uris: string[] };
+  // Only one song comes in, so (the mix being short anyway) nothing comes out.
+  expect(body.uris).toEqual([
+    ...["t1", "t2", "t3", "t4", "t5", "t6"].map((id) => `spotify:track:${id}`),
+    "spotify:track:t101",
+  ]);
+  await expect(page.getByText("Driving updated in Spotify.")).toBeVisible();
+
+  const mix = await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const mixes = await load("/src/mixes.ts");
+    return (await mixes.loadMixes()).find((m: { id: string }) => m.id === "driving");
+  });
+  // t1 is auto-locked by learning (it is in Liked Songs); t5 by the Keep tap.
+  expect(mix.locked.map((t: { id: string }) => t.id)).toContain("t5");
+  expect(mix.blocked).toEqual([{ artist: "Paper Coast", title: "Open Window" }]);
+  // Kept per song for the mix screen (the mock playlist doesn't keep the PUT, so not checked there).
+  expect(mix.reasons).toEqual({ t101: "Like your loved tracks" });
+});
+
+test("12 what Géza learned: labels can be switched off", async ({ page }) => {
+  await seed(page, { loggedIn: true, claudeKey: true, playlists: true });
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const store = await load("/src/store.ts");
+    const now = Date.now();
+    const j = (verdict: string, tags: string[], year: number, artist: string, country?: string) => ({
+      artist,
+      title: `Song ${Math.random()}`,
+      verdict,
+      tags,
+      year,
+      country,
+      dwellMs: 10_000,
+      at: now,
+    });
+    await store.set("train", {
+      yes: [],
+      no: [],
+      playlistId: null,
+      history: [
+        j("yes", ["indie rock", "driving"], 1996, "Fifth Gear", "GB"),
+        j("yes", ["indie rock", "mellow"], 1994, "Fifth Gear", "GB"),
+        j("yes", ["indie rock"], 1998, "Dunmore Quartet", "GB"),
+        j("no", ["ballad", "2020s"], 2022, "Someone", "US"),
+        j("no", ["ballad"], 2023, "Someone Else", "US"),
+      ],
+    });
+  });
+  await open(page, "./#/settings");
+  await page.getByRole("link", { name: /What Géza learned/ }).click();
+  await expect(page.getByRole("heading", { name: "What Géza learned" })).toBeVisible();
+  await expect(page.getByText("From 5 swipes")).toBeVisible();
+  const genres = page.getByRole("group", { name: "Genres and moods" });
+  await expect(genres.getByRole("button", { name: /indie rock/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(genres.getByRole("button", { name: /ballad/ })).toBeVisible();
+  await expect(
+    page.getByRole("group", { name: "Eras" }).getByRole("button", { name: /1990s/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("group", { name: "Artists" }).getByRole("button", { name: /Fifth Gear/ }),
+  ).toBeVisible();
+  await expect(
+    page
+      .getByRole("group", { name: "Where artists are from" })
+      .getByRole("button", { name: /United Kingdom/ }),
+  ).toBeVisible();
+  await snap(page, "12-taste");
+  // Switch "indie rock" off: it's remembered and leaves the profile Claude gets.
+  await genres.getByRole("button", { name: /indie rock/ }).click();
+  await expect(genres.getByRole("button", { name: /indie rock/ })).toHaveAttribute("aria-pressed", "false");
+  const muted = await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const store = await load("/src/store.ts");
+    return (await store.get("train")).muted;
+  });
+  expect(muted).toEqual(["tag:indie rock"]);
+});
+
+test("flow: rate the random picks, and it counts like a swipe", async ({ page }) => {
+  await seed(page, { loggedIn: true, claudeKey: true, playlists: true });
+  await open(page, "./#/random");
+  await page.getByRole("button", { name: "Pick 20 songs" }).click();
+  await expect(page.getByText(/2 songs ready in “Studio Random”/)).toBeVisible();
+  await expect(page.getByText("Long Way Round")).toBeVisible();
+  const added = page.waitForRequest(
+    (r) => r.method() === "POST" && /\/playlists\/[^/]+\/items$/.test(r.url()),
+  );
+  await page.getByRole("button", { name: "Yes: Long Way Round" }).click();
+  expect((await added).postDataJSON()).toEqual({ uris: ["spotify:track:t101"] });
+  await expect(page.getByRole("button", { name: "Yes: Long Way Round" })).toBeDisabled();
+  await page.getByRole("button", { name: "No: Open Window" }).click();
+  const history = await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const store = await load("/src/store.ts");
+    return (await store.get("train")).history;
+  });
+  expect(history.map((h: { verdict: string }) => h.verdict)).toEqual(["yes", "no"]);
+});
+
+test("mixes: nudges to swipe a deck first when there are no swipes yet", async ({ page }) => {
+  await seed(page, { loggedIn: true, claudeKey: true, playlists: true });
+  await open(page, "./#/");
+  await expect(page.getByText(/No swipes yet: do one deck first/)).toBeVisible();
+});

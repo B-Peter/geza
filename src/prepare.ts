@@ -149,7 +149,9 @@ export async function applyPending(mix: Mix, swap: PendingSwap): Promise<Mix> {
   if (!mix.playlistId) throw new Error("This mix has no playlist yet.");
   const current = await spotify.getPlaylistTracks(mix.playlistId);
   await pushSnapshot(mix.id, current);
-  const next = applySwap(current, swap.remove, swap.add);
+  // Never shrink the mix: with additions vetoed in Review, fewer come out.
+  const remove = balance(swap.remove, swap.add, current);
+  const next = applySwap(current, remove, swap.add);
   await spotify.replacePlaylistTracks(
     mix.playlistId,
     next.map((t) => t.uri),
@@ -157,14 +159,19 @@ export async function applyPending(mix: Mix, swap: PendingSwap): Promise<Mix> {
   // Géza's own change: record it so it isn't read as yours next sync.
   await setKnown(mix.id, next);
   await clearPending(mix.id);
+  const ids = new Set(next.map((t) => t.id));
+  const reasons: Record<string, string> = {};
+  for (const [id, why] of Object.entries(mix.reasons ?? {})) if (ids.has(id)) reasons[id] = why;
+  for (const a of swap.add) reasons[a.track.id] = a.reason;
   return {
     ...mix,
     lastAppliedAt: Date.now(),
     // Removed songs are never suggested again.
     blocked: addBlocked(
       mix.blocked,
-      swap.remove.map((r) => r.track),
+      remove.map((r) => r.track),
     ),
+    reasons,
   };
 }
 

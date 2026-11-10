@@ -6,6 +6,7 @@ import Random from "./screens/Random.svelte";
 import Review from "./screens/Review.svelte";
 import Settings from "./screens/Settings.svelte";
 import Setup from "./screens/Setup.svelte";
+import Taste from "./screens/Taste.svelte";
 import Train from "./screens/Train.svelte";
 import Welcome from "./screens/Welcome.svelte";
 import { app } from "./state.svelte.js";
@@ -30,6 +31,8 @@ import Loader from "./ui/Loader.svelte";
   <Random />
 {:else if app.route.name === "settings"}
   <Settings />
+{:else if app.route.name === "taste"}
+  <Taste />
 {:else}
   <Mixes />
 {/if}

@@ -3,9 +3,16 @@ import type { Mix } from "../mixes.js";
 import * as spotify from "../spotify.js";
 import { openUri } from "../spotify.js";
 import { app } from "../state.svelte.js";
+import { loadTrain } from "../train.js";
 import Cover from "../ui/Cover.svelte";
 import Icon from "../ui/Icon.svelte";
 import TabBar from "../ui/TabBar.svelte";
+
+/** How many swipes Géza has to go on; null while loading. */
+let swipes = $state<number | null>(null);
+$effect(() => {
+  void loadTrain().then((d) => (swipes = d.history.length));
+});
 
 const status = (mix: Mix) =>
   app.pending[mix.id]
@@ -59,11 +66,15 @@ const first = $derived(app.mixes[0]);
     </p>
   {/if}
 
-  <a class="card row random" href="#/train">
+  <a class="card row random" class:nudge={swipes === 0} href="#/train">
     <span class="ico"><Icon name="check" size={20} /></span>
     <span class="grow">
       <span class="title">Train Géza</span>
-      <span class="small muted">Swipe songs to teach it your taste</span>
+      {#if swipes === 0}
+        <span class="small">No swipes yet: do one deck first, so Géza knows your taste, not just your top tracks</span>
+      {:else}
+        <span class="small muted">Swipe songs to teach it your taste</span>
+      {/if}
     </span>
     <Icon name="arrow" size={20} />
   </a>
@@ -105,6 +116,8 @@ const first = $derived(app.mixes[0]);
   .reconnect p { margin: 0 0 6px; }
   .learned { margin: 12px 8px 0; }
   .random { margin-top: 12px; min-height: 72px; }
+  .random.nudge { background: var(--lime); }
+  .random.nudge .ico { background: var(--white); }
   .random .ico {
     width: 40px; height: 40px; flex: none; border-radius: 12px; background: var(--lime);
     display: flex; align-items: center; justify-content: center;
