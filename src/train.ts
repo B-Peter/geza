@@ -12,6 +12,7 @@ import { normalize, songKey } from "./text.js";
 
 export const DECK_SIZE = 15;
 export const YES_PLAYLIST = "Géza · Yes";
+export const NO_PLAYLIST = "Géza · No";
 /** Where each song starts: past most intros, near the first chorus. */
 export const START_AT = 0.35;
 const DEFAULT_START_MS = 45_000;
@@ -50,10 +51,14 @@ export interface TrainData {
   no: SongRef[];
   /** The private Spotify copy of the yes list; null until the first yes. */
   playlistId: string | null;
+  /** The private Spotify copy of the no list; null until the first no. */
+  noPlaylistId?: string | null;
   /** Every swipe with the song's attributes and listening time (newest last). */
   history: Judgement[];
   /** The last decks, newest last. */
   decks?: DeckStat[];
+  /** Taste inferences you switched off ("tag:ballad", "era:2020s", ...). */
+  muted?: string[];
 }
 
 const KEY = "train";
@@ -257,7 +262,7 @@ export async function buildDeck(data: TrainData, onProgress: (m: string) => void
       loved: [...data.yes.slice(-15), ...listening.topTracks.slice(0, 10)].map(ref),
       top_artists: listening.topArtists,
       judged_artists: judged,
-      taste: buildTaste(data.history),
+      taste: buildTaste(data.history, { muted: data.muted }),
     },
     "low",
   );
@@ -291,7 +296,7 @@ async function buildDeckByTitles(data: TrainData, l: Listening, known: Known, ha
       tune: { mood: 3, tempo: 3, energy: 3, fresh: 5, vocals: 3 },
       loved: [...data.yes.slice(-15), ...l.topTracks.slice(0, 10)].map(ref),
       blocked: [...data.no.slice(-150), ...have.map((c) => ref(c.track))],
-      taste: buildTaste(data.history),
+      taste: buildTaste(data.history, { muted: data.muted }),
       locked: [],
       current: [],
       top_artists: l.topArtists,
@@ -342,6 +347,7 @@ export async function judge(
     verdict,
     // Claude's labels plus the artist's community genres from MusicBrainz.
     tags: [...new Set([...card.tags, ...extra.genres].map((s) => s.toLowerCase()))],
+    ...(extra.genres.length ? { genres: extra.genres.map((s) => s.toLowerCase()) } : {}),
     ...(extra.originalYear || t.year ? { year: extra.originalYear ?? t.year } : {}),
     ...(extra.country ? { country: extra.country } : {}),
     ...(t.durationMs ? { durationMs: t.durationMs } : {}),
@@ -359,25 +365,93 @@ export async function judge(
   if (verdict === "no") {
     const next = { ...withHistory, no: [...data.no, ref(t)].slice(-500) };
     await saveTrain(next);
-    return next;
+    return copyToSpotify(next, "no", t, profile);
   }
-  let next: TrainData = { ...withHistory, yes: [...data.yes.filter((y) => y.id !== t.id), t] };
+  const next: TrainData = { ...withHistory, yes: [...data.yes.filter((y) => y.id !== t.id), t] };
   await saveTrain(next);
-  // The Spotify copy is a convenience: if it fails, the local list still counts.
+  return copyToSpotify(next, "yes", t, profile);
+}
+
+const COPIES = {
+  yes: { name: YES_PLAYLIST, description: "Songs you swiped yes on in Géza's Train.", field: "playlistId" },
+  no: {
+    name: NO_PLAYLIST,
+    description: "Songs you swiped no on in Géza's Train. Géza never suggests them again.",
+    field: "noPlaylistId",
+  },
+} as const;
+
+/**
+ * Keep a copy of the swipe in its private Spotify playlist. The playlists are
+ * also the backup: a fresh device reads them back (see restoreFromSpotify).
+ * A failure here is ignored; the local list still counts.
+ */
+async function copyToSpotify(
+  data: TrainData,
+  which: "yes" | "no",
+  track: Track,
+  profile: Profile | null,
+): Promise<TrainData> {
+  const copy = COPIES[which];
+  let next = data;
   try {
-    let playlistId = next.playlistId;
+    let playlistId = next[copy.field] ?? null;
     if (!playlistId) {
       const me = profile ?? (await spotify.getProfile());
-      playlistId = (
-        await spotify.createPlaylist(me.id, YES_PLAYLIST, "Songs you swiped yes on in Géza's Train.")
-      ).id;
-      next = { ...next, playlistId };
+      playlistId = (await spotify.createPlaylist(me.id, copy.name, copy.description)).id;
+      next = { ...next, [copy.field]: playlistId };
       await saveTrain(next);
     }
-    await spotify.addToPlaylist(playlistId, [card.track.uri]);
+    await spotify.addToPlaylist(playlistId, [track.uri]);
   } catch {
-    // Ignore; retried implicitly next time a playlist id is missing.
+    // Retried implicitly next time a playlist id is missing.
   }
+  return next;
+}
+
+/**
+ * On a device with no swipes yet, rebuild the yes and no lists from the
+ * "Géza · Yes" / "Géza · No" playlists in Spotify. Tags and listening times
+ * are gone, but the songs and artists (the strongest signals) come back.
+ * Returns what was restored, or null when there was nothing to do.
+ */
+export async function restoreFromSpotify(
+  data: TrainData,
+): Promise<{ data: TrainData; yes: number; no: number } | null> {
+  if (data.history.length || data.yes.length || data.no.length) return null;
+  const playlists = await spotify.listMyPlaylists();
+  const yesList = playlists.find((p) => p.name === YES_PLAYLIST);
+  const noList = playlists.find((p) => p.name === NO_PLAYLIST);
+  if (!yesList && !noList) return null;
+  const yes = yesList ? await spotify.getPlaylistTracks(yesList.id) : [];
+  const no = noList ? await spotify.getPlaylistTracks(noList.id) : [];
+  const at = Date.now();
+  const restored = (t: Track, verdict: Verdict): Judgement => ({
+    ...ref(t),
+    verdict,
+    tags: [],
+    dwellMs: 0,
+    at,
+  });
+  const next: TrainData = {
+    ...data,
+    yes,
+    no: no.map(ref),
+    playlistId: yesList?.id ?? null,
+    noPlaylistId: noList?.id ?? null,
+    history: [...yes.map((t) => restored(t, "yes")), ...no.map((t) => restored(t, "no"))],
+  };
+  await saveTrain(next);
+  return { data: next, yes: yes.length, no: no.length };
+}
+
+/** Switch a taste inference off or on again. */
+export async function setMuted(data: TrainData, key: string, muted: boolean): Promise<TrainData> {
+  const current = new Set(data.muted ?? []);
+  if (muted) current.add(key);
+  else current.delete(key);
+  const next = { ...data, muted: [...current] };
+  await saveTrain(next);
   return next;
 }
 
@@ -386,6 +460,6 @@ export function trainSignals(data: TrainData): { loved: SongRef[]; blocked: Song
   return {
     loved: data.yes.slice(-25).map(ref),
     blocked: data.no.slice(-200),
-    taste: buildTaste(data.history),
+    taste: buildTaste(data.history, { muted: data.muted }),
   };
 }

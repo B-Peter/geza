@@ -20,7 +20,7 @@ export const PLAYLIST_TRACKS = [
   track(6, "Gravel Choir", "Hymn for the Ring Road"),
 ];
 
-const SEARCH_RESULTS: Record<string, ReturnType<typeof track> & Record<string, unknown>> = {
+export const SEARCH_RESULTS: Record<string, ReturnType<typeof track> & Record<string, unknown>> = {
   "long way round": {
     ...track(101, "Fifth Gear", "Long Way Round"),
     album: { name: "Night Service", release_date: "1997-04-01" },
@@ -66,6 +66,14 @@ const TOP_TRACKS: Record<string, unknown[]> = {
 /** The fake Spotify app on the phone: what was asked to play, and whether it exists. */
 type FakeDevice = { id: string; name: string; type: string; is_active: boolean };
 const PHONE: FakeDevice = { id: "phone1", name: "iPhone", type: "Smartphone", is_active: true };
+
+/** Playlists in the tester's Spotify library (none by default). */
+export const library = {
+  playlists: [] as { id: string; name: string; tracks: unknown[] }[],
+  reset() {
+    this.playlists = [];
+  },
+};
 
 export const player = {
   devices: true,
@@ -146,9 +154,18 @@ export async function mockApis(page: Page): Promise<void> {
         uri: "spotify:playlist:x",
       });
     }
-    if (/^\/playlists\/[^/]+\/items$/.test(path)) {
-      if (route.request().method() === "GET")
-        return json({ items: PLAYLIST_TRACKS.map((t) => ({ item: t })), next: null });
+    if (path === "/me/playlists" && route.request().method() === "GET") {
+      return json({
+        items: library.playlists.map(({ id, name }) => ({ id, name, uri: `spotify:playlist:${id}` })),
+        next: null,
+      });
+    }
+    const items = /^\/playlists\/([^/]+)\/items$/.exec(path);
+    if (items) {
+      if (route.request().method() === "GET") {
+        const own = library.playlists.find((p) => p.id === items[1]);
+        return json({ items: (own?.tracks ?? PLAYLIST_TRACKS).map((t) => ({ item: t })), next: null });
+      }
       return json({ snapshot_id: "s1" });
     }
     if (path === "/me/player/devices") {
@@ -369,6 +386,7 @@ export const test = base.extend<{ errors: string[] }>({
       }
       // Fresh fake Spotify app for every test.
       player.reset();
+      library.reset();
       await mockApis(page);
       await use(errors);
     },

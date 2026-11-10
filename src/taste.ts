@@ -1,5 +1,7 @@
 // Taste profile from Train swipes: every attribute of every judged song,
-// weighted by how long you listened before deciding. Pure functions.
+// weighted by how long you listened before deciding, fading with age, and
+// normalised so a label counts for how you feel about it, not how often it
+// turns up. Pure functions.
 
 export type Verdict = "yes" | "no" | "later";
 
@@ -8,8 +10,10 @@ export interface Judgement {
   artist: string;
   title: string;
   verdict: Verdict;
-  /** Claude's labels: genre, era, mood. */
+  /** Claude's labels (genre, era, mood), plus MusicBrainz genres in older entries. */
   tags: string[];
+  /** The artist's community genres from MusicBrainz, when known. */
+  genres?: string[];
   year?: number;
   durationMs?: number;
   explicit?: boolean;
@@ -40,8 +44,25 @@ export interface TasteProfile {
   popularity: "well-known" | "lesser-known" | "any";
 }
 
+export type Dimension = "tag" | "era" | "artist" | "country";
+
+export interface TasteOptions {
+  /** "Now" for the age of each swipe; defaults to the clock. */
+  now?: number;
+  /** Inferences you've switched off, as "<dimension>:<key>" (see mutedKey). */
+  muted?: string[];
+}
+
 /** Below this many decisions the profile says nothing (too noisy). */
 export const MIN_JUDGED = 3;
+/** A swipe counts half as much after this long. */
+export const HALF_LIFE_MS = 60 * 24 * 3600 * 1000;
+/** A label needs at least this many swipes behind it to mean anything. */
+export const MIN_COUNT = 2;
+/** A tag on more than this share of judged songs says nothing about taste. */
+const COMMON_SHARE = 0.6;
+/** MusicBrainz genres are community labels: worth more than Claude's own tags. */
+const GENRE_BONUS = 0.5;
 
 /**
  * How much one swipe counts. A no within 6 s is a strong no (didn't even
@@ -56,35 +77,115 @@ export function weight(j: Pick<Judgement, "verdict" | "dwellMs">): number {
   return -1;
 }
 
+/** The swipe's weight, faded by its age: half after HALF_LIFE_MS. */
+export function agedWeight(j: Pick<Judgement, "verdict" | "dwellMs" | "at">, now: number): number {
+  const age = Math.max(0, now - j.at);
+  return weight(j) * 0.5 ** (age / HALF_LIFE_MS);
+}
+
 export const decade = (year: number): string => `${Math.floor(year / 10) * 10}s`;
+export const mutedKey = (dimension: Dimension, key: string): string => `${dimension}:${norm(key)}`;
 
 const norm = (s: string) => s.trim().toLowerCase();
 
-function scores(entries: [string, number][]): Map<string, number> {
-  const m = new Map<string, number>();
-  for (const [k, w] of entries) if (k) m.set(k, (m.get(k) ?? 0) + w);
-  return m;
+/** One label's standing: its normalised score and the songs behind it. */
+export interface Standing {
+  key: string;
+  /** Σ weights / √count: positive liked, negative disliked. */
+  score: number;
+  count: number;
+  /** "Artist – Title" of the swipes behind it, strongest first, up to 3. */
+  songs: string[];
+}
+
+interface Vote {
+  key: string;
+  w: number;
+  /** How much of a swipe this still is after fading (1 when fresh). */
+  n: number;
+  song: string;
+}
+
+function standings(votes: Vote[]): Standing[] {
+  const m = new Map<
+    string,
+    { sum: number; count: number; faded: number; songs: { song: string; w: number }[] }
+  >();
+  for (const { key, w, n, song } of votes) {
+    if (!key) continue;
+    const e = m.get(key) ?? { sum: 0, count: 0, faded: 0, songs: [] };
+    e.sum += w;
+    e.count++;
+    e.faded += n;
+    e.songs.push({ song, w });
+    m.set(key, e);
+  }
+  return [...m].map(([key, e]) => ({
+    key,
+    // Faded swipes count less in the denominator too, so old noise can't drown new signal.
+    score: e.faded > 0 ? e.sum / Math.sqrt(e.faded) : 0,
+    count: e.count,
+    songs: [...new Set(e.songs.sort((a, b) => Math.abs(b.w) - Math.abs(a.w)).map((s) => s.song))].slice(0, 3),
+  }));
 }
 
 /** Highest-scoring keys at or above `min`, and lowest at or below `-min`. */
-function split(m: Map<string, number>, min: number, max = 8): [string[], string[]] {
-  const sorted = [...m].sort((a, b) => b[1] - a[1]);
+function split(list: Standing[], min: number, max = 8): [string[], string[]] {
+  const sorted = [...list].sort((a, b) => b.score - a.score);
   const liked = sorted
-    .filter(([, s]) => s >= min)
+    .filter((s) => s.score >= min)
     .slice(0, max)
-    .map(([k]) => k);
+    .map((s) => s.key);
   const disliked = sorted
-    .filter(([, s]) => s <= -min)
+    .filter((s) => s.score <= -min)
     .reverse()
     .slice(0, max)
-    .map(([k]) => k);
+    .map((s) => s.key);
   return [liked, disliked];
 }
 
 const yesRate = (js: Judgement[]) => js.filter((j) => j.verdict === "yes").length / js.length;
 const avg = (ns: number[]) => ns.reduce((a, b) => a + b, 0) / ns.length;
+const songOf = (j: Judgement) => `${j.artist} – ${j.title}`;
 
-export function buildTaste(history: Judgement[]): TasteProfile {
+/** Every label's standing, per dimension, from the decided swipes. */
+export function explain(history: Judgement[], options: TasteOptions = {}): Record<Dimension, Standing[]> {
+  const now = options.now ?? Date.now();
+  const muted = new Set(options.muted ?? []);
+  const decided = history.filter((j) => j.verdict !== "later");
+  const w = (j: Judgement) => agedWeight(j, now);
+  const fade = (j: Judgement) => 0.5 ** (Math.max(0, now - j.at) / HALF_LIFE_MS);
+  const vote = (j: Judgement, key: string, boost = 1): Vote => ({
+    key,
+    w: w(j) * boost,
+    n: fade(j),
+    song: songOf(j),
+  });
+
+  const tagVotes = decided.flatMap((j) => {
+    const genres = new Set((j.genres ?? []).map(norm));
+    return [...new Set(j.tags.map(norm))].map((key) => vote(j, key, genres.has(key) ? 1 + GENRE_BONUS : 1));
+  });
+  // A tag on most songs you judged can't tell your yes from your no.
+  const common = decided.length >= 5 ? decided.length * COMMON_SHARE : Number.POSITIVE_INFINITY;
+  const keep = (dimension: Dimension) => (s: Standing) =>
+    s.count >= MIN_COUNT &&
+    !muted.has(mutedKey(dimension, s.key)) &&
+    (dimension !== "tag" || s.count <= common);
+
+  return {
+    tag: standings(tagVotes).filter(keep("tag")),
+    era: standings(decided.filter((j) => j.year).map((j) => vote(j, decade(j.year as number)))).filter(
+      keep("era"),
+    ),
+    artist: standings(decided.map((j) => vote(j, j.artist))).filter(keep("artist")),
+    country: standings(decided.filter((j) => j.country).map((j) => vote(j, j.country as string))).filter(
+      keep("country"),
+    ),
+  };
+}
+
+export function buildTaste(history: Judgement[], options: TasteOptions = {}): TasteProfile {
   const decided = history.filter((j) => j.verdict !== "later");
   const base: TasteProfile = {
     judged: decided.length,
@@ -102,26 +203,12 @@ export function buildTaste(history: Judgement[]): TasteProfile {
   };
   if (decided.length < MIN_JUDGED) return base;
 
-  const [likedTags, dislikedTags] = split(
-    scores(decided.flatMap((j) => j.tags.map((t): [string, number] => [norm(t), weight(j)]))),
-    1,
-  );
-  const [likedEras, dislikedEras] = split(
-    scores(decided.filter((j) => j.year).map((j): [string, number] => [decade(j.year as number), weight(j)])),
-    1,
-    4,
-  );
-  const [likedArtists, dislikedArtists] = split(
-    scores(decided.map((j): [string, number] => [j.artist, weight(j)])),
-    1,
-    10,
-  );
-  // Countries need a clear pattern (2+ points), not one song.
-  const [likedCountries, dislikedCountries] = split(
-    scores(decided.filter((j) => j.country).map((j): [string, number] => [j.country as string, weight(j)])),
-    2,
-    4,
-  );
+  const dims = explain(history, options);
+  const [likedTags, dislikedTags] = split(dims.tag, 1);
+  const [likedEras, dislikedEras] = split(dims.era, 1, 4);
+  const [likedArtists, dislikedArtists] = split(dims.artist, 1, 10);
+  // Countries need a clear pattern (three songs' worth), not a couple.
+  const [likedCountries, dislikedCountries] = split(dims.country, 1.5, 4);
 
   // Explicit lyrics: only judge with at least 3 explicit songs decided.
   const explicitOnes = decided.filter((j) => j.explicit === true);

@@ -431,6 +431,18 @@ export async function createPlaylist(userId: string, name: string, description: 
   }
 }
 
+/** All playlists in your library (yours and followed), 50 per page. */
+export async function listMyPlaylists(): Promise<Playlist[]> {
+  const out: Playlist[] = [];
+  for (let offset = 0; ; offset += 50) {
+    const page = await api<{ items: (Playlist | null)[]; next: string | null }>("/me/playlists", {
+      query: { limit: 50, offset },
+    });
+    for (const p of page.items) if (p?.id) out.push(p);
+    if (!page.next || page.items.length === 0) return out;
+  }
+}
+
 export async function getPlaylistTracks(playlistId: string): Promise<Track[]> {
   const out: Track[] = [];
   for (let offset = 0; ; offset += 50) {

@@ -1,4 +1,4 @@
-import { expect, open, player, seed, snap, test } from "./fixtures.js";
+import { expect, library, open, player, SEARCH_RESULTS, seed, snap, test } from "./fixtures.js";
 
 test.afterEach(({ errors }) => {
   expect(errors, "console errors").toEqual([]);
@@ -206,4 +206,31 @@ test("train: one real song per artist Claude names; the start screen shows how t
   await expect(page.getByTestId("last-deck")).toHaveText(
     /2 of 3 artists on Spotify · 2 songs · 1 yes,\s+0 no/,
   );
+});
+
+test("train: a no goes to “Géza · No” in Spotify, and a fresh device reads both lists back", async ({
+  page,
+}) => {
+  await seed(page, ready);
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  await expect(page.getByRole("article", { name: /Long Way Round/ })).toBeVisible();
+  const created = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/me/playlists"));
+  await page.getByRole("button", { name: "No, never suggest it" }).click();
+  expect((await created).postDataJSON()).toMatchObject({ name: "Géza · No", public: false });
+
+  // Another device: no local swipes, but the playlists are in Spotify.
+  library.playlists = [
+    { id: "pl-yes", name: "Géza · Yes", tracks: [SEARCH_RESULTS["long way round"]] },
+    { id: "pl-no", name: "Géza · No", tracks: [SEARCH_RESULTS["open window"]] },
+  ];
+  await seed(page, ready);
+  await page.evaluate(async () => {
+    const store = await import(/* @vite-ignore */ "/src/store.ts");
+    await store.remove("train");
+  });
+  await open(page, "./#/train");
+  await expect(page.getByText("Restored 1 yes and 1 no from your Spotify playlists.")).toBeVisible();
+  await expect(page.getByText("So far: 1 yes · 1 no")).toBeVisible();
+  await expect(page.getByRole("link", { name: /Play “Géza · Yes” in Spotify · 1 songs/ })).toBeVisible();
 });

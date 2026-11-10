@@ -10,7 +10,9 @@ import {
   deckOutcome,
   judge,
   loadTrain,
+  NO_PLAYLIST,
   recordDeck,
+  restoreFromSpotify,
   startPosition,
   type TrainData,
   type Verdict,
@@ -76,10 +78,16 @@ const mmss = (ms: number) =>
 const TAG_TONES = ["tone-genre", "tone-era", "tone-mood", "tone-extra"];
 
 $effect(() => {
-  void loadTrain().then((d) => {
+  void loadTrain().then(async (d) => {
     data = d;
+    // A fresh device: your swipes come back from the Spotify playlists.
+    const restored = await restoreFromSpotify(d).catch(() => null);
+    if (restored) {
+      data = restored.data;
+      app.notify(`Restored ${restored.yes} yes and ${restored.no} no from your Spotify playlists.`, "ok");
+    }
     // Get a deck ready while you read the screen, so Start is instant.
-    prefetchDeck(d);
+    prefetchDeck($state.snapshot(data) as TrainData);
   });
   const tick = setInterval(() => (now = Date.now()), 1000);
   return () => {
@@ -488,7 +496,7 @@ $effect(() => {
     </p>
     <div class="card rules">
       <div class="row"><span class="badge keep">→</span><span><strong>Swipe right: keep</strong><br /><span class="small muted">Goes to “{YES_PLAYLIST}” and steers every mix</span></span></div>
-      <div class="row"><span class="badge drop">←</span><span><strong>Swipe left: drop</strong><br /><span class="small muted">Never suggested again</span></span></div>
+      <div class="row"><span class="badge drop">←</span><span><strong>Swipe left: drop</strong><br /><span class="small muted">Goes to “{NO_PLAYLIST}”, never suggested again</span></span></div>
       <div class="row"><span class="badge later">↑</span><span><strong>Swipe up: skip for now</strong><br /><span class="small muted">Doesn't count either way; may come back</span></span></div>
     </div>
     {#if data && (data.yes.length || data.no.length)}
