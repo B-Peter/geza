@@ -3,11 +3,11 @@ import {
   AXES,
   CHIP_DISTANCE,
   clampLevel,
-  describe,
   levelPoint,
   pick,
   point,
   polygon,
+  summary,
   VIEW,
 } from "../src/radar.js";
 
@@ -47,7 +47,7 @@ group("radar geometry", () => {
 
   it("draws one point per axis and summarises mood, tempo and energy", () => {
     expect(polygon(tune).split(" ")).toHaveLength(5);
-    expect(describe(tune)).toBe("Bright · Medium · Driven");
+    expect(summary(tune)).toBe("Bright · Medium · Driven");
   });
 });
 

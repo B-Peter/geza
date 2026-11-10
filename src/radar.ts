@@ -84,7 +84,7 @@ export function pick(x: number, y: number): { axis: AxisKey; level: number } | n
 }
 
 /** Short summary like "Bright · Brisk · Driven". */
-export function describe(tune: Tune): string {
+export function summary(tune: Tune): string {
   const [mood, tempo, energy] = AXES;
   if (!mood || !tempo || !energy) return "";
   return [mood, tempo, energy].map((a) => a.words[tune[a.key] - 1]).join(" · ");
