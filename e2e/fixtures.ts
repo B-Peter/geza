@@ -20,9 +20,27 @@ export const PLAYLIST_TRACKS = [
   track(6, "Gravel Choir", "Hymn for the Ring Road"),
 ];
 
-const SEARCH_RESULTS: Record<string, ReturnType<typeof track>> = {
-  "long way round": track(101, "Fifth Gear", "Long Way Round"),
-  "open window": track(102, "Paper Coast", "Open Window"),
+const SEARCH_RESULTS: Record<string, ReturnType<typeof track> & Record<string, unknown>> = {
+  "long way round": {
+    ...track(101, "Fifth Gear", "Long Way Round"),
+    album: { name: "Night Service", release_date: "1997-04-01" },
+    duration_ms: 222_000,
+    explicit: false,
+    popularity: 58,
+  },
+  "open window": {
+    ...track(102, "Paper Coast", "Open Window"),
+    album: { name: "Low Tide Hours", release_date: "2019" },
+    duration_ms: 245_000,
+    explicit: true,
+  },
+};
+
+/** The fake Spotify app on the phone: what was asked to play, and whether it exists. */
+export const player = {
+  devices: true,
+  playing: null as string | null,
+  plays: [] as { uris: string[]; position_ms: number }[],
 };
 
 export const CLAUDE_PICKS = {
@@ -31,17 +49,37 @@ export const CLAUDE_PICKS = {
     { artist: "Gravel Choir", title: "Hymn for the Ring Road", reason: "Never played" },
   ],
   add: [
-    { artist: "Fifth Gear", title: "Long Way Round", reason: "Like your loved tracks" },
-    { artist: "Paper Coast", title: "Open Window", reason: "Same scene, new to you" },
+    {
+      artist: "Fifth Gear",
+      title: "Long Way Round",
+      reason: "Like your loved tracks",
+      tags: ["indie rock", "90s", "driving"],
+    },
+    {
+      artist: "Paper Coast",
+      title: "Open Window",
+      reason: "Same scene, new to you",
+      tags: ["dream pop", "2010s", "mellow"],
+    },
   ],
 };
 
-const CORS = { "access-control-allow-origin": "*" };
+// Like the real APIs: answer CORS preflights (Safari sends them for requests
+// with an Authorization header and is strict about the allowed headers).
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "access-control-allow-headers":
+    "*, authorization, content-type, x-api-key, anthropic-version, anthropic-dangerous-direct-browser-access",
+  "access-control-max-age": "600",
+};
+const preflight = (route: import("@playwright/test").Route) => route.fulfill({ status: 204, headers: CORS });
 const PLAYS_BASE = Date.now();
 
 /** Mock every external API the app talks to. */
 export async function mockApis(page: Page): Promise<void> {
   await page.route(/^https:\/\/api\.spotify\.com\/v1\//, async (route) => {
+    if (route.request().method() === "OPTIONS") return preflight(route);
     const url = new URL(route.request().url());
     const path = url.pathname.replace("/v1", "");
     const json = (body: unknown, status = 200) =>
@@ -63,6 +101,28 @@ export async function mockApis(page: Page): Promise<void> {
       if (route.request().method() === "GET")
         return json({ items: PLAYLIST_TRACKS.map((t) => ({ item: t })), next: null });
       return json({ snapshot_id: "s1" });
+    }
+    if (path === "/me/player/devices") {
+      return json({
+        devices: player.devices
+          ? [{ id: "phone1", name: "iPhone", type: "Smartphone", is_active: true }]
+          : [],
+      });
+    }
+    if (path === "/me/player/play" && route.request().method() === "PUT") {
+      if (!player.devices) return json({ error: { message: "No active device found" } }, 404);
+      const body = route.request().postDataJSON() as { uris: string[]; position_ms: number };
+      player.plays.push(body);
+      player.playing = body.uris[0]?.split(":").pop() ?? null;
+      return route.fulfill({ status: 204, headers: CORS });
+    }
+    if (path === "/me/player/pause") {
+      player.playing = null;
+      return route.fulfill({ status: 204, headers: CORS });
+    }
+    if (path === "/me/player/currently-playing") {
+      if (!player.playing) return route.fulfill({ status: 204, headers: CORS });
+      return json({ is_playing: true, item: { id: player.playing } });
     }
     if (path === "/me/player/recently-played") {
       // Two plays of Midnight Tarmac and one of Harbour Lights, in the last hour.
@@ -90,6 +150,7 @@ export async function mockApis(page: Page): Promise<void> {
   });
 
   await page.route(/^https:\/\/api\.anthropic\.com\//, async (route) => {
+    if (route.request().method() === "OPTIONS") return preflight(route);
     const url = route.request().url();
     if (url.includes("/v1/models/")) {
       return route.fulfill({
@@ -130,7 +191,7 @@ export interface SeedOptions {
 }
 
 export const ALL_SCOPES =
-  "user-read-private user-top-read playlist-read-private playlist-modify-private user-library-read user-read-recently-played";
+  "user-read-private user-top-read playlist-read-private playlist-modify-private user-library-read user-read-recently-played user-read-playback-state user-modify-playback-state";
 
 /** Put the app into a state by writing straight to its storage (dev server only). */
 export async function seed(page: Page, opts: SeedOptions): Promise<void> {
@@ -186,8 +247,10 @@ export async function seed(page: Page, opts: SeedOptions): Promise<void> {
 
 /** Open a route with a full reload, so the app starts from the seeded storage. */
 export async function open(page: Page, path: string): Promise<void> {
+  // Leave the app completely, then one clean load. (Load-then-reload aborted
+  // the first load's requests mid-flight, which WebKit reports as errors.)
+  await page.goto("about:blank");
   await page.goto(path);
-  await page.reload();
 }
 
 /** Collects console errors and page exceptions; tests assert it stays empty. */
@@ -201,6 +264,14 @@ export const test = base.extend<{ errors: string[] }>({
         if (m.type() === "error") errors.push(m.text());
       });
       page.on("pageerror", (e) => errors.push(e.message));
+      if (process.env.PW_TRACE_ERRORS) {
+        page.on("console", (m) => console.log("CONSOLE", m.type(), m.text()));
+        page.on("pageerror", (e) => console.log("PAGEERROR", e.stack));
+      }
+      // Fresh fake Spotify app for every test.
+      player.devices = true;
+      player.playing = null;
+      player.plays = [];
       await mockApis(page);
       await use(errors);
     },

@@ -11,6 +11,10 @@ interface Screen {
   ready: (page: Page) => Promise<void>;
 }
 
+test.afterEach(({ errors }) => {
+  expect(errors, "console errors").toEqual([]);
+});
+
 const all = { loggedIn: true, claudeKey: true, playlists: true } satisfies SeedOptions;
 
 const SCREENS: Screen[] = [
@@ -42,6 +46,16 @@ const SCREENS: Screen[] = [
     ready: (p) => p.getByText("Linked as Peter").waitFor(),
   },
   { name: "random", seed: all, path: "./#/random", ready: (p) => p.getByText("Start from").waitFor() },
+  { name: "train", seed: all, path: "./#/train", ready: (p) => p.getByText("Swipe right: keep").waitFor() },
+  {
+    name: "train-card",
+    seed: all,
+    path: "./#/train",
+    ready: async (p) => {
+      await p.getByRole("button", { name: "Start a deck" }).click();
+      await p.getByText("Night Service · 1997 · 3:42").waitFor();
+    },
+  },
 ];
 
 /** Everything wrong with the current screen's layout, as readable lines. */

@@ -72,6 +72,7 @@ export async function prepareRandom(
     tune: settings.tune,
     loved: [...trained.loved, ...topTracks.map(ref)].slice(0, 40),
     blocked: trained.blocked,
+    taste: trained.taste,
     locked: [],
     current: [],
     top_artists: topArtists,

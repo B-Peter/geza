@@ -114,6 +114,8 @@ test("security: the Spotify login asks only for the scopes the app uses", async 
       "playlist-modify-private",
       "playlist-read-private",
       "user-library-read",
+      "user-modify-playback-state",
+      "user-read-playback-state",
       "user-read-private",
       "user-read-recently-played",
       "user-top-read",

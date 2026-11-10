@@ -61,13 +61,26 @@ export async function remove(key: string): Promise<void> {
   await rawDelete(`data:${key}`);
 }
 
-async function cryptoKey(): Promise<CryptoKey> {
-  let key = await rawGet<CryptoKey>(CRYPTO_KEY_ID);
-  if (!key) {
-    key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-    await rawSet(CRYPTO_KEY_ID, key);
-  }
-  return key;
+let keyPromise: Promise<CryptoKey> | undefined;
+
+/**
+ * The device's encryption key, created once. Single-flight: two secrets
+ * saved at the same moment on a fresh install must not each create a key
+ * (the second would overwrite the first and make its secret unreadable).
+ */
+function cryptoKey(): Promise<CryptoKey> {
+  keyPromise ??= (async () => {
+    let key = await rawGet<CryptoKey>(CRYPTO_KEY_ID);
+    if (!key) {
+      key = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+      await rawSet(CRYPTO_KEY_ID, key);
+    }
+    return key;
+  })().catch((e) => {
+    keyPromise = undefined; // let a later call try again
+    throw e;
+  });
+  return keyPromise;
 }
 
 interface SecretEntry {

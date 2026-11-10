@@ -40,6 +40,11 @@ export interface Track {
   durationMs?: number;
   /** Album cover, a medium-size image on i.scdn.co. */
   image?: string;
+  album?: string;
+  year?: number;
+  explicit?: boolean;
+  /** 0–100; Spotify may leave it out for small developer apps. */
+  popularity?: number;
 }
 
 interface Tokens {
@@ -64,7 +69,9 @@ interface SpotifyTrack {
   type?: string;
   artists: { name: string }[];
   duration_ms?: number;
-  album?: { images?: { url: string; width?: number | null }[] };
+  explicit?: boolean;
+  popularity?: number;
+  album?: { name?: string; release_date?: string; images?: { url: string; width?: number | null }[] };
 }
 
 export interface Profile {
@@ -356,6 +363,11 @@ function cover(t: SpotifyTrack): string | undefined {
   return url?.startsWith("https://i.scdn.co/") ? url : undefined;
 }
 
+function releaseYear(t: SpotifyTrack): number | undefined {
+  const y = Number(t.album?.release_date?.slice(0, 4));
+  return y > 1900 && y < 2100 ? y : undefined;
+}
+
 const toTrack = (t: SpotifyTrack): Track => ({
   id: t.id,
   uri: t.uri,
@@ -363,6 +375,10 @@ const toTrack = (t: SpotifyTrack): Track => ({
   title: t.name,
   ...(t.duration_ms ? { durationMs: t.duration_ms } : {}),
   ...(cover(t) ? { image: cover(t) } : {}),
+  ...(t.album?.name ? { album: t.album.name } : {}),
+  ...(releaseYear(t) ? { year: releaseYear(t) } : {}),
+  ...(typeof t.explicit === "boolean" ? { explicit: t.explicit } : {}),
+  ...(typeof t.popularity === "number" ? { popularity: t.popularity } : {}),
 });
 
 export function getProfile(): Promise<Profile> {

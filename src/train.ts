@@ -6,6 +6,7 @@ import { curate, type Pick } from "./claude.js";
 import type { Profile, Track } from "./spotify.js";
 import * as spotify from "./spotify.js";
 import * as store from "./store.js";
+import { buildTaste, type Judgement, type TasteProfile, type Verdict } from "./taste.js";
 import { songKey } from "./text.js";
 
 export const DECK_SIZE = 15;
@@ -19,6 +20,8 @@ type SongRef = { artist: string; title: string };
 export interface Card {
   track: Track;
   reason: string;
+  /** Claude's genre / era / mood labels. */
+  tags: string[];
 }
 
 export interface TrainData {
@@ -26,13 +29,16 @@ export interface TrainData {
   no: SongRef[];
   /** The private Spotify copy of the yes list; null until the first yes. */
   playlistId: string | null;
+  /** Every swipe with the song's attributes and listening time (newest last). */
+  history: Judgement[];
 }
 
 const KEY = "train";
 const ref = (t: SongRef): SongRef => ({ artist: t.artist, title: t.title });
 
 export async function loadTrain(): Promise<TrainData> {
-  return (await store.get<TrainData>(KEY)) ?? { yes: [], no: [], playlistId: null };
+  const saved = await store.get<TrainData>(KEY);
+  return { yes: [], no: [], playlistId: null, ...saved, history: saved?.history ?? [] };
 }
 
 export async function saveTrain(data: TrainData): Promise<void> {
@@ -54,7 +60,7 @@ export function deckFrom(resolved: { pick: Pick; track: Track | null }[], data: 
     const key = songKey(track.artist, track.title);
     if (seen.has(key)) continue;
     seen.add(key);
-    cards.push({ track, reason: pick.reason });
+    cards.push({ track, reason: pick.reason, tags: (pick.tags ?? []).slice(0, 4) });
   }
   return cards.slice(0, DECK_SIZE);
 }
@@ -75,6 +81,7 @@ export async function buildDeck(
     tune: { mood: 3, tempo: 3, energy: 3, fresh: 4, vocals: 3 },
     loved: [...data.yes.slice(-15), ...topTracks.slice(0, 10)].map(ref),
     blocked: data.no.slice(-150),
+    taste: buildTaste(data.history),
     locked: [],
     current: [],
     top_artists: topArtists,
@@ -86,7 +93,7 @@ export async function buildDeck(
   return cards;
 }
 
-export type Verdict = "yes" | "no" | "later";
+export type { Verdict };
 
 /** Record a swipe. Yes also goes into the private "Géza · Yes" playlist. */
 export async function judge(
@@ -94,14 +101,32 @@ export async function judge(
   card: Card,
   verdict: Verdict,
   profile: Profile | null,
+  dwellMs = 0,
 ): Promise<TrainData> {
-  if (verdict === "later") return data;
+  const t = card.track;
+  const judgement: Judgement = {
+    artist: t.artist,
+    title: t.title,
+    verdict,
+    tags: card.tags,
+    ...(t.year ? { year: t.year } : {}),
+    ...(t.durationMs ? { durationMs: t.durationMs } : {}),
+    ...(t.explicit !== undefined ? { explicit: t.explicit } : {}),
+    ...(t.popularity !== undefined ? { popularity: t.popularity } : {}),
+    dwellMs: Math.max(0, Math.round(dwellMs)),
+    at: Date.now(),
+  };
+  const withHistory = { ...data, history: [...data.history, judgement].slice(-1000) };
+  if (verdict === "later") {
+    await saveTrain(withHistory);
+    return withHistory;
+  }
   if (verdict === "no") {
-    const next = { ...data, no: [...data.no, ref(card.track)].slice(-500) };
+    const next = { ...withHistory, no: [...data.no, ref(t)].slice(-500) };
     await saveTrain(next);
     return next;
   }
-  let next: TrainData = { ...data, yes: [...data.yes.filter((t) => t.id !== card.track.id), card.track] };
+  let next: TrainData = { ...withHistory, yes: [...data.yes.filter((y) => y.id !== t.id), t] };
   await saveTrain(next);
   // The Spotify copy is a convenience: if it fails, the local list still counts.
   try {
@@ -122,6 +147,10 @@ export async function judge(
 }
 
 /** Taste signals from Train, for every Claude request. */
-export function trainSignals(data: TrainData): { loved: SongRef[]; blocked: SongRef[] } {
-  return { loved: data.yes.slice(-25).map(ref), blocked: data.no.slice(-200) };
+export function trainSignals(data: TrainData): { loved: SongRef[]; blocked: SongRef[]; taste: TasteProfile } {
+  return {
+    loved: data.yes.slice(-25).map(ref),
+    blocked: data.no.slice(-200),
+    taste: buildTaste(data.history),
+  };
 }

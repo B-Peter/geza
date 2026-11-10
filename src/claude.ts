@@ -2,6 +2,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { deleteSecret, getSecret, setSecret } from "./store.js";
+import type { TasteProfile } from "./taste.js";
 
 // Haiku: fast and low-cost, enough for picking a handful of songs.
 export const MODEL = "claude-haiku-5-5";
@@ -97,6 +98,12 @@ Rules:
 - If candidates are too few after filtering, return fewer picks, not
   worse ones.
 - Give each pick a reason of 12 words or fewer, plain language.
+- Give each pick 2 to 4 short lowercase tags: its main genre, its era as a
+  decade (e.g. "90s"), and its mood (e.g. "driving", "mellow").
+- "taste" summarises the listener's own swipes: favour liked_tags,
+  liked_eras and liked_artists; avoid disliked ones; respect "explicit"
+  ("avoid" means no explicit songs), "length" and "popularity" when they
+  aren't "any". It outranks top artists, but not the owner's note.
 - Output JSON only, matching the schema.
 
 Tune values are 1 to 5 per axis and describe the target for the mix:
@@ -108,6 +115,8 @@ export interface Pick {
   artist: string;
   title: string;
   reason: string;
+  /** 2–4 short labels: genre, era, mood. Optional in code; Claude always sends them. */
+  tags?: string[];
 }
 
 export interface Picks {
@@ -145,6 +154,8 @@ export interface CurateInput {
   played_often?: (SongRef & { plays: number })[];
   never_played?: SongRef[];
   remove_first?: SongRef[];
+  /** From Train swipes (see taste.ts). */
+  taste?: TasteProfile;
 }
 
 const PICK_SCHEMA = {
@@ -153,8 +164,9 @@ const PICK_SCHEMA = {
     artist: { type: "string" },
     title: { type: "string" },
     reason: { type: "string" },
+    tags: { type: "array", items: { type: "string" } },
   },
-  required: ["artist", "title", "reason"],
+  required: ["artist", "title", "reason", "tags"],
   additionalProperties: false,
 };
 

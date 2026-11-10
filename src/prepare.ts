@@ -89,6 +89,7 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
     // Train "yes" songs first: the most explicit taste signal there is.
     loved: [...trained.loved, ...uniqueRefs([...mix.locked, ...topTracks], 25)].slice(0, 40),
     blocked: [...mix.blocked, ...trained.blocked],
+    taste: trained.taste,
     locked: mix.locked.map(ref),
     current: current.map(ref),
     top_artists: topArtists,
