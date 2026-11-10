@@ -1,4 +1,5 @@
 <script lang="ts">
+import { countryName, type Enrichment, enrich } from "../musicbrainz.js";
 import * as spotify from "../spotify.js";
 import { SpotifyError } from "../spotify.js";
 import { app } from "../state.svelte.js";
@@ -30,9 +31,25 @@ let leaving = $state<Verdict | null>(null);
 let cardEl = $state<HTMLElement | null>(null);
 let sessionYes = $state(0);
 let sessionNo = $state(0);
+/** MusicBrainz details per track id, filled in the background. */
+let details = $state<Record<string, Enrichment>>({});
+
+/** Enrich the deck from the current card onwards, one song at a time. */
+async function enrichDeck(cards: Card[]) {
+  for (const c of cards) {
+    if (details[c.track.id]) continue;
+    const e = await enrich(c.track);
+    details[c.track.id] = e;
+  }
+}
 
 const card = $derived(deck[index] ?? null);
 const done = $derived(deck.length > 0 && index >= deck.length);
+const extra = $derived(card ? details[card.track.id] : undefined);
+/** The album's first release year, when this is a later version. */
+const firstYear = $derived(
+  extra?.originalYear && card && extra.originalYear < (card.track.year ?? 9999) ? extra.originalYear : null,
+);
 const listened = $derived(playingSince ? Math.max(0, Math.floor((now - playingSince) / 1000)) : 0);
 
 const mmss = (ms: number) =>
@@ -99,6 +116,7 @@ async function start() {
   const cards = await app.task("Starting…", (progress) => buildDeck(current, progress));
   if (!cards) return;
   deck = cards;
+  void enrichDeck(cards);
   index = 0;
   sessionYes = 0;
   sessionNo = 0;
@@ -130,7 +148,8 @@ function decide(verdict: Verdict) {
   const next = index + 1;
   if (next < deck.length) void playFrom(next);
   else if (device) void spotify.pause(device.id).catch(() => {});
-  void judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell).then((d) => {
+  const extra = $state.snapshot(details[judged.track.id] ?? { genres: [] }) as Enrichment;
+  void judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell, extra).then((d) => {
     data = d;
     void app.refreshGeza();
   });
@@ -245,13 +264,27 @@ $effect(() => {
           </div>
           <div class="artist">{card.track.artist}</div>
           <div class="meta small muted">
-            {[card.track.album, card.track.year, card.track.durationMs ? mmss(card.track.durationMs) : ""]
+            {[
+              card.track.album,
+              firstYear ? `${firstYear} (this version ${card.track.year})` : card.track.year,
+              card.track.durationMs ? mmss(card.track.durationMs) : "",
+            ]
               .filter(Boolean)
               .join(" · ")}
           </div>
-          {#if card.tags.length}
+          {#if extra?.country || extra?.artistType}
+            <div class="origin small muted">
+              {extra.artistType === "Person" ? "Solo artist" : (extra.artistType ?? "Artist")}{extra.country
+                ? ` from ${countryName(extra.country)}`
+                : ""}
+            </div>
+          {/if}
+          {#if card.tags.length || extra?.genres.length}
             <div class="tags">
               {#each card.tags as tag, i (tag)}<span class="tag {TAG_TONES[i] ?? 'tone-extra'}">{tag}</span>{/each}
+              {#each (extra?.genres ?? []).filter((g) => !card.tags.includes(g)).slice(0, 2) as g (g)}<span
+                  class="tag tone-genre">{g}</span
+                >{/each}
             </div>
           {/if}
           {#if card.track.popularity !== undefined}
@@ -396,6 +429,7 @@ $effect(() => {
   }
   .artist { margin-top: 2px; font-weight: 600; }
   .meta { margin-top: 4px; }
+  .origin { margin-top: 2px; }
   .tags { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
   .tag { font-size: 12px; line-height: 16px; font-weight: 700; padding: 5px 10px; border-radius: 12px; }
   .tone-genre { background: #ffe3d6; }

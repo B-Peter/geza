@@ -5,7 +5,7 @@ import { expect, test } from "./fixtures.js";
 // style, a new script origin, a forgotten API host.
 
 const CONNECT =
-  "connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://api.anthropic.com";
+  "connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://api.anthropic.com https://musicbrainz.org";
 
 for (const path of ["./", "./spike.html"]) {
   test(`prod: ${path} loads under the CSP with no console errors`, async ({ page, errors }) => {

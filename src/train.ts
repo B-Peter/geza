@@ -3,6 +3,7 @@
 // becomes the strongest taste signal everywhere; No is never suggested again.
 
 import { curate, type Pick } from "./claude.js";
+import type { Enrichment } from "./musicbrainz.js";
 import type { Profile, Track } from "./spotify.js";
 import * as spotify from "./spotify.js";
 import * as store from "./store.js";
@@ -102,14 +103,17 @@ export async function judge(
   verdict: Verdict,
   profile: Profile | null,
   dwellMs = 0,
+  extra: Enrichment = { genres: [] },
 ): Promise<TrainData> {
   const t = card.track;
   const judgement: Judgement = {
     artist: t.artist,
     title: t.title,
     verdict,
-    tags: card.tags,
-    ...(t.year ? { year: t.year } : {}),
+    // Claude's labels plus the artist's community genres from MusicBrainz.
+    tags: [...new Set([...card.tags, ...extra.genres].map((s) => s.toLowerCase()))],
+    ...(extra.originalYear || t.year ? { year: extra.originalYear ?? t.year } : {}),
+    ...(extra.country ? { country: extra.country } : {}),
     ...(t.durationMs ? { durationMs: t.durationMs } : {}),
     ...(t.explicit !== undefined ? { explicit: t.explicit } : {}),
     ...(t.popularity !== undefined ? { popularity: t.popularity } : {}),

@@ -13,7 +13,8 @@ const CSP = [
   "font-src 'self'",
   // Album covers come from Spotify's image CDN (images only).
   "img-src 'self' https://i.scdn.co",
-  "connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://api.anthropic.com",
+  // MusicBrainz: open music database for original years and artist details.
+  "connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://api.anthropic.com https://musicbrainz.org",
   "worker-src 'self'",
   "manifest-src 'self'",
   "base-uri 'none'",

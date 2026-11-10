@@ -174,9 +174,43 @@ export async function mockApis(page: Page): Promise<void> {
     });
   });
 
+  // MusicBrainz: Fifth Gear is a British group; "Night Service" first came out
+  // in 1994 (Spotify's copy says 1997). Paper Coast isn't in the database.
+  await page.route(/^https:\/\/musicbrainz\.org\//, async (route) => {
+    if (route.request().method() === "OPTIONS") return preflight(route);
+    const url = new URL(route.request().url());
+    const q = (url.searchParams.get("query") ?? "").toLowerCase();
+    const json = (body: unknown) =>
+      route.fulfill({ contentType: "application/json", headers: CORS, body: JSON.stringify(body) });
+    if (url.pathname === "/ws/2/artist" && q.includes("fifth gear")) {
+      return json({
+        artists: [
+          {
+            score: 100,
+            name: "Fifth Gear",
+            country: "GB",
+            type: "Group",
+            tags: [
+              { name: "britpop", count: 9 },
+              { name: "british", count: 7 },
+              { name: "indie rock", count: 5 },
+            ],
+          },
+        ],
+      });
+    }
+    if (url.pathname === "/ws/2/release-group" && q.includes("night service")) {
+      return json({
+        "release-groups": [{ score: 100, title: "Night Service", "first-release-date": "1994-03-01" }],
+      });
+    }
+    return json(url.pathname === "/ws/2/artist" ? { artists: [] } : { "release-groups": [] });
+  });
+
   // Fail loudly if anything else tries to reach the internet.
   await page.route(/^https?:\/\/(?!127\.0\.0\.1)/, (route) => {
-    if (/api\.spotify\.com|api\.anthropic\.com/.test(route.request().url())) return route.fallback();
+    if (/api\.spotify\.com|api\.anthropic\.com|musicbrainz\.org/.test(route.request().url()))
+      return route.fallback();
     return route.abort();
   });
 }
@@ -297,8 +331,11 @@ export { expect };
 /** Wait until fonts are loaded and nothing is animating, then screenshot. */
 export async function snap(page: Page, name: string): Promise<void> {
   await page.evaluate(() => document.fonts.ready);
-  // The version label changes with every build; keep it out of the comparison.
-  await expect(page).toHaveScreenshot(`${name}.png`, { mask: [page.locator(".version")] });
+  // Keep moving parts out of the comparison: the build version label and the
+  // Train listening timer.
+  await expect(page).toHaveScreenshot(`${name}.png`, {
+    mask: [page.locator(".version"), page.locator(".playing")],
+  });
   if (process.env.SHOTS_DIR) {
     await page.screenshot({ path: `${process.env.SHOTS_DIR}/${name}.png` });
   }

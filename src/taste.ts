@@ -15,6 +15,8 @@ export interface Judgement {
   explicit?: boolean;
   /** Spotify's 0–100 score, when Spotify still provides it. */
   popularity?: number;
+  /** Artist's country (ISO code), from MusicBrainz. */
+  country?: string;
   /** How long it played before you decided. */
   dwellMs: number;
   at: number;
@@ -28,6 +30,9 @@ export interface TasteProfile {
   disliked_eras: string[];
   liked_artists: string[];
   disliked_artists: string[];
+  /** Artists' countries (ISO codes), from MusicBrainz. */
+  liked_countries: string[];
+  disliked_countries: string[];
   explicit: "fine" | "avoid" | "unknown";
   length: "shorter" | "longer" | "any";
   popularity: "well-known" | "lesser-known" | "any";
@@ -87,6 +92,8 @@ export function buildTaste(history: Judgement[]): TasteProfile {
     disliked_eras: [],
     liked_artists: [],
     disliked_artists: [],
+    liked_countries: [],
+    disliked_countries: [],
     explicit: "unknown",
     length: "any",
     popularity: "any",
@@ -106,6 +113,12 @@ export function buildTaste(history: Judgement[]): TasteProfile {
     scores(decided.map((j): [string, number] => [j.artist, weight(j)])),
     1,
     10,
+  );
+  // Countries need a clear pattern (2+ points), not one song.
+  const [likedCountries, dislikedCountries] = split(
+    scores(decided.filter((j) => j.country).map((j): [string, number] => [j.country as string, weight(j)])),
+    2,
+    4,
   );
 
   // Explicit lyrics: only judge with at least 3 explicit songs decided.
@@ -144,6 +157,8 @@ export function buildTaste(history: Judgement[]): TasteProfile {
     disliked_eras: dislikedEras,
     liked_artists: likedArtists,
     disliked_artists: dislikedArtists,
+    liked_countries: likedCountries,
+    disliked_countries: dislikedCountries,
     explicit,
     length,
     popularity,

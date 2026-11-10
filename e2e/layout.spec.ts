@@ -59,7 +59,7 @@ const SCREENS: Screen[] = [
     path: "./#/train",
     ready: async (p) => {
       await p.getByRole("button", { name: "Start a deck" }).click();
-      await p.getByText("Night Service · 1997 · 3:42").waitFor();
+      await p.getByText("Group from United Kingdom").waitFor();
     },
   },
 ];

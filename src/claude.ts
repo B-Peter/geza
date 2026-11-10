@@ -101,7 +101,8 @@ Rules:
 - Give each pick 2 to 4 short lowercase tags: its main genre, its era as a
   decade (e.g. "90s"), and its mood (e.g. "driving", "mellow").
 - "taste" summarises the listener's own swipes: favour liked_tags,
-  liked_eras and liked_artists; avoid disliked ones; respect "explicit"
+  liked_eras, liked_artists and liked_countries (ISO codes of where artists
+  are from); avoid disliked ones; respect "explicit"
   ("avoid" means no explicit songs), "length" and "popularity" when they
   aren't "any". It outranks top artists, but not the owner's note.
 - Output JSON only, matching the schema.

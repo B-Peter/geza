@@ -20,7 +20,7 @@ test("11 train card with song details", async ({ page }) => {
   const card = page.getByRole("article", { name: "Long Way Round by Fifth Gear" });
   await expect(card).toBeVisible();
   // Everything known about the song is on the card.
-  await expect(card.getByText("Night Service · 1997 · 3:42")).toBeVisible();
+  await expect(card.getByText(/Night Service · .*3:42/)).toBeVisible();
   await expect(card.getByText("indie rock")).toBeVisible();
   await expect(card.getByText("90s")).toBeVisible();
   await expect(card.getByText("driving")).toBeVisible();
@@ -30,6 +30,8 @@ test("11 train card with song details", async ({ page }) => {
   // One request starts the whole deck in Spotify, skipping the intro.
   expect(player.plays[0]?.uris).toEqual(["spotify:track:t101", "spotify:track:t102"]);
   expect(player.plays[0]?.position_ms).toBe(Math.round(222_000 * 0.35));
+  // Wait for the MusicBrainz details too, so the screenshot is stable.
+  await expect(card.getByText("Group from United Kingdom")).toBeVisible();
   await snap(page, "11-train-card");
 });
 
@@ -90,4 +92,25 @@ test("train: asks to wake Spotify when it isn't running", async ({ page }) => {
   await page.getByRole("button", { name: "I'm back" }).click();
   await expect(page.getByRole("article", { name: /Long Way Round/ })).toBeVisible();
   await expect(page.getByText("Wake up Spotify")).toHaveCount(0);
+});
+
+test("train: MusicBrainz adds the original year, origin and genres", async ({ page }) => {
+  await seed(page, ready);
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  const card = page.getByRole("article", { name: /Long Way Round/ });
+  // Filled in a moment later, in the background.
+  await expect(card.getByText("Night Service · 1994 (this version 1997) · 3:42")).toBeVisible();
+  await expect(card.getByText("Group from United Kingdom")).toBeVisible();
+  await expect(card.getByText("britpop")).toBeVisible();
+  // ...and it all goes into what Géza learns.
+  await page.getByRole("button", { name: "Yes, I like it" }).click();
+  await expect(page.getByRole("article", { name: /Open Window/ })).toBeVisible();
+  const first = await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const store = await load("/src/store.ts");
+    return (await store.get("train")).history[0];
+  });
+  expect(first).toMatchObject({ year: 1994, country: "GB" });
+  expect(first.tags).toEqual(expect.arrayContaining(["indie rock", "90s", "driving", "britpop"]));
 });

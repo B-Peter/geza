@@ -73,6 +73,14 @@ describe("buildTaste", () => {
     expect(p.popularity).toBe("lesser-known");
   });
 
+  it("learns countries only from a clear pattern", () => {
+    const fromHu = [1, 2, 3].map(() => j("yes", { country: "HU" }));
+    const fromUs = [j("no", { country: "US" })];
+    const p = buildTaste([...fromHu, ...fromUs]);
+    expect(p.liked_countries).toEqual(["HU"]);
+    expect(p.disliked_countries).toEqual([]); // one song isn't a pattern
+  });
+
   it("names decades", () => {
     expect(decade(1997)).toBe("1990s");
     expect(decade(2000)).toBe("2000s");
