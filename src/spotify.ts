@@ -2,7 +2,7 @@
 // refresh, and the endpoints the app needs.
 
 import { deleteSecret, getSecret, setSecret } from "./store.js";
-import { normalize } from "./text.js";
+import { baseTitle, normalize } from "./text.js";
 
 const AUTH_URL = "https://accounts.spotify.com/authorize";
 const TOKEN_URL = "https://accounts.spotify.com/api/token";
@@ -62,7 +62,7 @@ interface TokenResponse {
   scope?: string;
 }
 
-interface SpotifyTrack {
+export interface SpotifyTrack {
   id: string;
   uri: string;
   name: string;
@@ -468,21 +468,83 @@ function chunk<T>(list: T[], size: number): T[][] {
 }
 
 /** Resolve an artist/title pair from Claude to a Spotify track, or null. */
-export async function findTrack(artist: string, title: string): Promise<Track | null> {
-  const json = await api<{ tracks?: { items: SpotifyTrack[] } }>("/search", {
-    query: { q: `track:${title} artist:${artist}`, type: "track", market: MARKET, limit: 5 },
-  });
-  const items = json.tracks?.items ?? [];
-  const wanted = normalize(artist);
-  const match =
+/** Does any of the track's artists match the one we asked for (exactly or loosely)? */
+function byArtist(items: SpotifyTrack[], artist: string): SpotifyTrack | undefined {
+  const wanted = normalize(artist.split(",")[0] ?? artist);
+  return (
     items.find((t) => t.artists.some((a) => normalize(a.name) === wanted)) ??
     items.find((t) =>
       t.artists.some((a) => {
         const n = normalize(a.name);
         return n.includes(wanted) || wanted.includes(n);
       }),
-    );
-  return match ? toTrack(match) : null;
+    )
+  );
+}
+
+/**
+ * Pick the track Claude meant: right artist, then the title has to match
+ * loosely too (Spotify's plain search also returns covers and other songs).
+ */
+export function matchTrack(items: SpotifyTrack[], artist: string, title: string): SpotifyTrack | undefined {
+  const wantedTitle = baseTitle(title);
+  // The plain title first ("Blue Hour" over "Blue Hour (Live)"), then anything close.
+  const exact = items.filter(
+    (t) => normalize(t.name) === wantedTitle || normalize(t.name) === normalize(title),
+  );
+  const loose = items.filter((t) => {
+    const n = baseTitle(t.name);
+    return n.includes(wantedTitle) || wantedTitle.includes(n);
+  });
+  return byArtist(exact, artist) ?? byArtist(loose, artist);
+}
+
+async function searchTracks(q: string, limit: number): Promise<SpotifyTrack[]> {
+  const json = await api<{ tracks?: { items: SpotifyTrack[] } }>("/search", {
+    query: { q, type: "track", market: MARKET, limit },
+  });
+  return json.tracks?.items ?? [];
+}
+
+/**
+ * Find a song by artist and title. The fielded query is precise but brittle
+ * (punctuation, "feat.", bracketed versions); a plain query catches most of
+ * what it misses.
+ */
+export async function findTrack(artist: string, title: string): Promise<Track | null> {
+  const exact = matchTrack(await searchTracks(`track:${title} artist:${artist}`, 5), artist, title);
+  if (exact) return toTrack(exact);
+  const plain = `${title.replace(/\s*[([].*?[)\]]/g, "")} ${artist.split(",")[0] ?? artist}`.trim();
+  const loose = matchTrack(await searchTracks(plain, 10), artist, title);
+  return loose ? toTrack(loose) : null;
+}
+
+export interface Artist {
+  id: string;
+  name: string;
+  genres: string[];
+  popularity?: number;
+}
+
+/** Find an artist by name: exact (normalised) match first, then the closest. */
+export async function findArtist(name: string): Promise<Artist | null> {
+  const json = await api<{ artists?: { items: Artist[] } }>("/search", {
+    query: { q: name, type: "artist", market: MARKET, limit: 5 },
+  });
+  const items = json.artists?.items ?? [];
+  const wanted = normalize(name);
+  const hit =
+    items.find((a) => normalize(a.name) === wanted) ??
+    items.find((a) => normalize(a.name).includes(wanted) || wanted.includes(normalize(a.name)));
+  return hit ? { id: hit.id, name: hit.name, genres: hit.genres ?? [], popularity: hit.popularity } : null;
+}
+
+/** The artist's ten most popular songs in this market, most popular first. */
+export async function artistTopTracks(artistId: string): Promise<Track[]> {
+  const json = await api<{ tracks: SpotifyTrack[] }>(`/artists/${encodeURIComponent(artistId)}/top-tracks`, {
+    query: { market: MARKET },
+  });
+  return (json.tracks ?? []).map(toTrack);
 }
 
 /** Link that opens the playlist in the Spotify app. */

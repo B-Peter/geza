@@ -2,9 +2,9 @@
 // one is built when Train opens, the next one while you swipe. Lives for the
 // app session (memory only).
 
-import { buildDeck, type Card, type TrainData } from "./train.js";
+import { buildDeck, type Deck, type TrainData } from "./train.js";
 
-let next: Promise<Card[]> | null = null;
+let next: Promise<Deck> | null = null;
 
 /** Start building a deck in the background, unless one is already coming. */
 export function prefetchDeck(data: TrainData): void {
@@ -20,11 +20,11 @@ export function prefetchDeck(data: TrainData): void {
  * The prepared deck if there is one (waiting for it if it's still on its
  * way), else a fresh one. Either way, the prepared deck is used up.
  */
-export async function takeDeck(data: TrainData, onProgress: (m: string) => void): Promise<Card[]> {
+export async function takeDeck(data: TrainData, onProgress: (m: string) => void): Promise<Deck> {
   const ready = next;
   next = null;
   if (ready) {
-    onProgress("Claude is picking songs to try…");
+    onProgress("Claude is picking artists to discover…");
     try {
       return await ready;
     } catch {

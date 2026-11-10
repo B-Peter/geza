@@ -7,8 +7,10 @@ import { app } from "../state.svelte.js";
 import {
   type Card,
   DECK_SIZE,
+  deckOutcome,
   judge,
   loadTrain,
+  recordDeck,
   startPosition,
   type TrainData,
   type Verdict,
@@ -19,6 +21,8 @@ import Icon from "../ui/Icon.svelte";
 
 let data = $state<TrainData | null>(null);
 let deck = $state<Card[]>([]);
+/** The current deck's id (its "at"), for the Deck done stats. */
+let deckAt = $state(0);
 let index = $state(0);
 let device = $state<spotify.Device | null>(null);
 /** "spotify": Spotify isn't running; "premium": playback needs Premium. */
@@ -59,6 +63,13 @@ const statusLine = $derived(
     .join(" · "),
 );
 const listened = $derived(playingSince ? Math.max(0, Math.floor((now - playingSince) / 1000)) : 0);
+/** How the previous deck went, for the start screen. */
+const lastDeck = $derived.by(() => {
+  const stat = data?.decks?.at(-1);
+  if (!stat || !data) return null;
+  return { ...stat, ...deckOutcome(data, stat.at) };
+});
+const skipped = $derived(deck.length - sessionYes - sessionNo);
 
 const mmss = (ms: number) =>
   `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
@@ -204,10 +215,12 @@ async function wakeAndPlay(i: number) {
 async function start() {
   if (!data) return;
   const current = $state.snapshot(data) as TrainData;
-  const cards = await app.task("Starting…", (progress) => takeDeck(current, progress));
-  if (!cards) return;
-  deck = cards;
-  void enrichDeck(cards);
+  const built = await app.task("Starting…", (progress) => takeDeck(current, progress));
+  if (!built) return;
+  deck = built.cards;
+  deckAt = built.at;
+  data = await recordDeck(current, built);
+  void enrichDeck(built.cards);
   index = 0;
   sessionYes = 0;
   sessionNo = 0;
@@ -425,7 +438,7 @@ $effect(() => {
       <button class="choice no" aria-label="No, never suggest it" onclick={() => decide("no")}>
         <span aria-hidden="true">✕</span>
       </button>
-      <button class="choice later" aria-label="Not now" onclick={() => decide("later")}>
+      <button class="choice later" aria-label="Skip for now" onclick={() => decide("later")}>
         <span aria-hidden="true">↑</span>
       </button>
       <button class="choice yes" aria-label="Yes, I like it" onclick={() => decide("yes")}>
@@ -458,8 +471,9 @@ $effect(() => {
       <div class="stats">
         <div class="stat yes"><strong>{sessionYes}</strong>Yes</div>
         <div class="stat"><strong class="red">{sessionNo}</strong>No</div>
-        <div class="stat"><strong class="muted">{deck.length - sessionYes - sessionNo}</strong>Later</div>
+        <div class="stat"><strong class="muted">{skipped}</strong>Skipped</div>
       </div>
+      {#if skipped > 0}<p class="small muted">Skipped songs may come back in a later deck.</p>{/if}
       <div class="two">
         {#if data?.playlistId}
           <a class="btn secondary small" href={spotify.openUri(data.playlistId)}>Play “{YES_PLAYLIST}”</a>
@@ -469,16 +483,27 @@ $effect(() => {
     </div>
   {:else if !blocked && !choosing}
     <p class="lead">
-      Claude picks {DECK_SIZE} songs, mostly new to you. Each one starts at its catchy part. You stay in Géza; the sound comes
-      from your Spotify app.
+      Claude names artists you probably don't know; Spotify supplies a real song by each. {DECK_SIZE} per deck, each
+      starting at its catchy part. You stay in Géza; the sound comes from your Spotify app.
     </p>
     <div class="card rules">
       <div class="row"><span class="badge keep">→</span><span><strong>Swipe right: keep</strong><br /><span class="small muted">Goes to “{YES_PLAYLIST}” and steers every mix</span></span></div>
       <div class="row"><span class="badge drop">←</span><span><strong>Swipe left: drop</strong><br /><span class="small muted">Never suggested again</span></span></div>
-      <div class="row"><span class="badge later">↑</span><span><strong>Swipe up: not now</strong><br /><span class="small muted">Recorded, but doesn't count either way</span></span></div>
+      <div class="row"><span class="badge later">↑</span><span><strong>Swipe up: skip for now</strong><br /><span class="small muted">Doesn't count either way; may come back</span></span></div>
     </div>
     {#if data && (data.yes.length || data.no.length)}
       <p class="small muted tally">So far: {data.yes.length} yes · {data.no.length} no</p>
+    {/if}
+    {#if data?.playlistId}
+      <a class="btn secondary small yes-link" href={spotify.openUri(data.playlistId)}>
+        <Icon name="play" size={16} />Play “{YES_PLAYLIST}” in Spotify · {data.yes.length} songs
+      </a>
+    {/if}
+    {#if lastDeck}
+      <p class="small muted tally" data-testid="last-deck">
+        Last deck: {lastDeck.found} of {lastDeck.asked} artists on Spotify · {lastDeck.size} songs · {lastDeck.yes} yes,
+        {lastDeck.no} no
+      </p>
     {/if}
   {/if}
 </main>
@@ -529,6 +554,7 @@ $effect(() => {
   .badge.drop { background: #ffe3d6; color: var(--danger); }
   .badge.later { background: var(--bg); color: var(--muted); }
   .tally { text-align: center; margin: 12px 8px 0; }
+  .yes-link { display: flex; justify-content: center; margin: 12px auto 0; width: fit-content; }
   .deck { position: relative; margin-top: 12px; }
   .behind {
     position: absolute; left: 14px; right: 14px; top: 14px; bottom: -10px;

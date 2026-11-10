@@ -46,3 +46,91 @@ describe("deckFrom", () => {
     expect(cards.map((c) => c.track.id)).toEqual(["t2"]);
   });
 });
+
+import { chooseTrack, deckFromArtists, deckOutcome } from "../src/train.js";
+
+const top = (artist: string, titles: string[], pop = 50) =>
+  titles.map((title, i) => ({
+    id: `${artist}-${i}`,
+    uri: `spotify:track:${artist}-${i}`,
+    artist,
+    title,
+    durationMs: 200_000,
+    popularity: pop - i * 5,
+  }));
+const artist = (name: string, want: "hit" | "deep cut" | "any" = "hit") => ({
+  artist: name,
+  want,
+  reason: "r",
+  tags: ["indie"],
+});
+const all = () => true;
+
+describe("chooseTrack", () => {
+  it("introduces a new artist with their biggest usable song", () => {
+    const t = chooseTrack(artist("A"), top("A", ["Hit", "Second", "Third"]), all);
+    expect(t?.title).toBe("Hit");
+  });
+  it("skips songs you know and side versions, and very short tracks", () => {
+    const tracks = [
+      ...top("A", ["Hit", "Hit - Live", "Hit (Remix)"]),
+      ...top("A", ["Interlude"]).map((t) => ({ ...t, id: "short", durationMs: 40_000 })),
+      ...top("A", ["Fourth"]),
+    ];
+    const t = chooseTrack(artist("A"), tracks, (x) => x.title !== "Hit");
+    expect(t?.title).toBe("Fourth");
+  });
+  it("gives a familiar artist a deep cut: below the top three, least popular", () => {
+    const t = chooseTrack(artist("A", "deep cut"), top("A", ["1", "2", "3", "4", "5", "6"]), all);
+    expect(t?.title).toBe("6");
+  });
+  it("returns null when nothing is usable", () => {
+    expect(chooseTrack(artist("A"), top("A", ["Hit"]), () => false)).toBeNull();
+  });
+});
+
+describe("deckFromArtists", () => {
+  it("deals one song per artist in Claude's order, skipping artists Spotify lacks", () => {
+    const cards = deckFromArtists(
+      [
+        { pick: artist("A"), tracks: top("A", ["A1", "A2"]) },
+        { pick: artist("Ghost"), tracks: [] },
+        { pick: artist("B"), tracks: top("B", ["B1"]) },
+      ],
+      empty,
+      { trackIds: new Set(), artists: new Set() },
+    );
+    expect(cards.map((c) => c.track.title)).toEqual(["A1", "B1"]);
+    expect(cards[0]).toMatchObject({ reason: "r", tags: ["indie"] });
+  });
+  it("never deals a judged or known song, and caps familiar artists", () => {
+    const judged: TrainData = { ...empty, no: [{ artist: "A", title: "A1" }] };
+    const familiar = ["K1", "K2", "K3", "K4"].map((k) => ({
+      pick: artist(k, "deep cut"),
+      tracks: top(k, ["x", "y"]),
+    }));
+    const cards = deckFromArtists(
+      [{ pick: artist("A"), tracks: top("A", ["A1", "A2"]) }, ...familiar],
+      judged,
+      { trackIds: new Set(["A-1"]), artists: new Set(["k1", "k2", "k3", "k4"]) },
+    );
+    // A1 judged, A2 known → nothing from A; only MAX_KNOWN_ARTISTS familiar ones.
+    expect(cards.map((c) => c.track.artist)).toEqual(["K1", "K2", "K3"]);
+  });
+});
+
+describe("deckOutcome", () => {
+  it("counts the verdicts of one deck only", () => {
+    const h = (verdict: "yes" | "no" | "later", deck: number) => ({
+      artist: "a",
+      title: "t",
+      verdict,
+      tags: [],
+      dwellMs: 0,
+      at: 0,
+      deck,
+    });
+    const data: TrainData = { ...empty, history: [h("yes", 1), h("no", 1), h("later", 1), h("yes", 2)] };
+    expect(deckOutcome(data, 1)).toEqual({ yes: 1, no: 1, later: 1 });
+  });
+});

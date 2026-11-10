@@ -188,3 +188,22 @@ test("train: says so when Spotify accepts but stays silent", async ({ page }) =>
   await expect(page.getByText(/Playing on iPhone · started in/)).toBeVisible();
   await expect(alert).toHaveCount(0);
 });
+
+test("train: one real song per artist Claude names; the start screen shows how the last deck went", async ({
+  page,
+}) => {
+  await seed(page, ready);
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  await expect(page.getByRole("article", { name: "Long Way Round by Fifth Gear" })).toBeVisible();
+  await page.getByRole("button", { name: "Yes, I like it" }).click();
+  await expect(page.getByRole("article", { name: /Open Window/ })).toBeVisible();
+  await page.getByRole("button", { name: "Skip for now" }).click();
+  await expect(page.getByText("Deck done")).toBeVisible();
+  await expect(page.getByText("Skipped songs may come back")).toBeVisible();
+  // Back on the start screen: Nobody Band wasn't on Spotify.
+  await open(page, "./#/train");
+  await expect(page.getByTestId("last-deck")).toHaveText(
+    /2 of 3 artists on Spotify · 2 songs · 1 yes,\s+0 no/,
+  );
+});

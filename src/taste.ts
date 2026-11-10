@@ -20,6 +20,8 @@ export interface Judgement {
   /** How long it played before you decided. */
   dwellMs: number;
   at: number;
+  /** The deck it was in (the deck's "at"). */
+  deck?: number;
 }
 
 export interface TasteProfile {

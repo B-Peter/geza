@@ -187,7 +187,12 @@ const PICKS_SCHEMA = {
  */
 export type Effort = "low" | "medium";
 
-export async function curate(input: CurateInput, effort: Effort = "medium"): Promise<Picks> {
+async function ask<T>(
+  system: string,
+  input: unknown,
+  schema: Record<string, unknown>,
+  effort: Effort,
+): Promise<T> {
   const apiKey = await getSecret<string>(KEY_SECRET);
   if (!apiKey) throw new Error("Add your Claude key first.");
   let response: Anthropic.Message;
@@ -197,9 +202,9 @@ export async function curate(input: CurateInput, effort: Effort = "medium"): Pro
       max_tokens: 16000,
       output_config: {
         effort,
-        format: { type: "json_schema", schema: PICKS_SCHEMA },
+        format: { type: "json_schema", schema },
       },
-      system: SYSTEM_PROMPT,
+      system,
       messages: [{ role: "user", content: JSON.stringify(input, null, 2) }],
     });
   } catch (e) {
@@ -208,14 +213,90 @@ export async function curate(input: CurateInput, effort: Effort = "medium"): Pro
   if (response.stop_reason === "refusal") throw new Error("Claude declined this request.");
   if (response.stop_reason === "max_tokens") throw new Error("Claude's answer was cut off. Try again.");
   const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
-  let picks: Picks;
   try {
-    picks = JSON.parse(text) as Picks;
+    return JSON.parse(text) as T;
   } catch {
     throw new Error("Claude returned invalid JSON.");
   }
+}
+
+export async function curate(input: CurateInput, effort: Effort = "medium"): Promise<Picks> {
+  const picks = await ask<Picks>(SYSTEM_PROMPT, input, PICKS_SCHEMA, effort);
   if (!Array.isArray(picks?.add) || !Array.isArray(picks?.remove)) {
     throw new Error("Claude's answer didn't match the expected shape.");
   }
   return picks;
+}
+
+// --- Train decks: artists to discover -----------------------------------------
+// Claude names artists, not songs: it knows artists far more reliably than
+// exact titles, and Spotify then supplies real tracks with real popularity.
+
+export const DECK_PROMPT = `You help one listener discover music they don't know yet. You name
+artists; the app then fetches their real songs from Spotify and plays one
+per artist for the listener to judge. You do not talk to the listener.
+
+Rules:
+- Return exactly "count" real, active-on-streaming artists. No duplicates.
+- Most of them (at least 80%) must be NEW to the listener: not in
+  "top_artists", not in "judged_artists", not the artists of "loved".
+  Up to 20% may be familiar artists, for which you ask for a "deep cut".
+- Spread: about 55% close to their taste (same scenes as what they love),
+  30% adjacent (neighbouring genres, other eras, other countries or
+  languages in the same spirit), 15% bold wildcards that could still land.
+- Vary eras and countries. Prefer artists with a loyal following over
+  chart acts, unless "taste.popularity" is "well-known".
+- "taste" summarises their swipes: favour liked_tags, liked_eras,
+  liked_countries (ISO codes); avoid disliked ones and disliked_artists;
+  respect "explicit", "length" and "popularity" when not "any"/"unknown".
+- "want": "hit" for a new artist (their best-known song is the best
+  introduction), "deep cut" for a familiar one, "any" when it doesn't
+  matter.
+- "reason": 12 words or fewer, plain language, why this listener.
+- "tags": 2 to 4 short lowercase labels: main genre, era as a decade
+  (e.g. "90s"), mood (e.g. "driving", "mellow").
+- Output JSON only, matching the schema.`;
+
+export interface ArtistPick {
+  artist: string;
+  want: "hit" | "deep cut" | "any";
+  reason: string;
+  tags: string[];
+}
+
+export interface DeckInput {
+  count: number;
+  loved: SongRef[];
+  top_artists: string[];
+  /** Artists already judged in Train (any verdict), so decks don't repeat. */
+  judged_artists: string[];
+  taste: TasteProfile;
+}
+
+const ARTISTS_SCHEMA = {
+  type: "object",
+  properties: {
+    artists: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          artist: { type: "string" },
+          want: { type: "string", enum: ["hit", "deep cut", "any"] },
+          reason: { type: "string" },
+          tags: { type: "array", items: { type: "string" } },
+        },
+        required: ["artist", "want", "reason", "tags"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["artists"],
+  additionalProperties: false,
+};
+
+export async function pickArtists(input: DeckInput, effort: Effort = "low"): Promise<ArtistPick[]> {
+  const out = await ask<{ artists: ArtistPick[] }>(DECK_PROMPT, input, ARTISTS_SCHEMA, effort);
+  if (!Array.isArray(out?.artists)) throw new Error("Claude's answer didn't match the expected shape.");
+  return out.artists.filter((a) => typeof a?.artist === "string" && a.artist.trim());
 }

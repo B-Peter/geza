@@ -17,7 +17,7 @@ vi.mock("../src/store.js", () => ({
 }));
 vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {}, removeItem: () => {} });
 
-import { api, SessionExpiredError } from "../src/spotify.js";
+import { api, findTrack, matchTrack, SessionExpiredError } from "../src/spotify.js";
 
 interface Call {
   url: string;
@@ -115,5 +115,53 @@ describe("missingScopes", () => {
     const { missingScopes, REQUIRED_SCOPES } = await import("../src/spotify.js");
     secrets.set("spotifyTokens", stored(3_600_000));
     expect(await missingScopes()).toEqual(REQUIRED_SCOPES);
+  });
+});
+
+describe("findTrack", () => {
+  const t = (id: string, artist: string, name: string) => ({
+    id,
+    uri: `spotify:track:${id}`,
+    name,
+    artists: [{ name: artist }],
+  });
+  const q = (c: Call) => decodeURIComponent(new URL(c.url).searchParams.get("q") ?? "");
+
+  it("takes the fielded search when the artist matches", async () => {
+    secrets.set("spotifyTokens", stored(3_600_000));
+    stubFetch(() =>
+      json({ tracks: { items: [t("a", "Someone Else", "Blue Hour"), t("b", "Sundial", "Blue Hour")] } }),
+    );
+    const found = await findTrack("Sundial", "Blue Hour");
+    expect(found?.id).toBe("b");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("falls back to a plain query when the fielded one finds nothing", async () => {
+    secrets.set("spotifyTokens", stored(3_600_000));
+    stubFetch((c) =>
+      q(c).startsWith("track:")
+        ? json({ tracks: { items: [] } })
+        : json({ tracks: { items: [t("x", "Sundial", "Don't Stop Now - Remastered 2011")] } }),
+    );
+    const found = await findTrack("Sundial", "Don’t Stop Now (Single Version)");
+    expect(found?.id).toBe("x");
+    expect(calls).toHaveLength(2);
+    expect(q(calls[1] as Call)).toBe("Don’t Stop Now Sundial");
+  });
+
+  it("ignores a plain-search hit with a different title or artist", async () => {
+    secrets.set("spotifyTokens", stored(3_600_000));
+    stubFetch((c) =>
+      q(c).startsWith("track:")
+        ? json({ tracks: { items: [] } })
+        : json({ tracks: { items: [t("y", "Sundial", "Another Song"), t("z", "Cover Band", "Blue Hour")] } }),
+    );
+    await expect(findTrack("Sundial", "Blue Hour")).resolves.toBeNull();
+  });
+
+  it("prefers the track whose title matches over one by the artist with another title", () => {
+    const items = [t("1", "Sundial", "Blue Hour (Live)"), t("2", "Sundial", "Blue Hour")];
+    expect(matchTrack(items as never, "Sundial", "Blue Hour")?.id).toBe("2");
   });
 });

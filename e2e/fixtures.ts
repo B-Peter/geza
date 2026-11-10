@@ -36,6 +36,33 @@ const SEARCH_RESULTS: Record<string, ReturnType<typeof track> & Record<string, u
   },
 };
 
+/** Artists Claude names for a Train deck; Spotify has a song for each. */
+export const CLAUDE_ARTISTS = {
+  artists: [
+    {
+      artist: "Fifth Gear",
+      want: "hit",
+      reason: "Like your loved tracks",
+      tags: ["indie rock", "90s", "driving"],
+    },
+    {
+      artist: "Paper Coast",
+      want: "hit",
+      reason: "Same scene, new to you",
+      tags: ["dream pop", "2010s", "mellow"],
+    },
+    { artist: "Nobody Band", want: "any", reason: "Not on Spotify", tags: ["folk"] },
+  ],
+};
+const ARTISTS: Record<string, { id: string; name: string; genres: string[]; popularity: number }> = {
+  "fifth gear": { id: "a1", name: "Fifth Gear", genres: ["britpop"], popularity: 40 },
+  "paper coast": { id: "a2", name: "Paper Coast", genres: ["dream pop"], popularity: 25 },
+};
+const TOP_TRACKS: Record<string, unknown[]> = {
+  a1: [SEARCH_RESULTS["long way round"]],
+  a2: [SEARCH_RESULTS["open window"]],
+};
+
 /** The fake Spotify app on the phone: what was asked to play, and whether it exists. */
 type FakeDevice = { id: string; name: string; type: string; is_active: boolean };
 const PHONE: FakeDevice = { id: "phone1", name: "iPhone", type: "Smartphone", is_active: true };
@@ -170,6 +197,13 @@ export async function mockApis(page: Page): Promise<void> {
       const ids = (url.searchParams.get("ids") ?? "").split(",");
       return json(ids.map((id) => id === "t1"));
     }
+    const top = /^\/artists\/([^/]+)\/top-tracks$/.exec(path);
+    if (top) return json({ tracks: TOP_TRACKS[top[1] ?? ""] ?? [] });
+    if (path === "/search" && url.searchParams.get("type") === "artist") {
+      const q = (url.searchParams.get("q") ?? "").toLowerCase();
+      const hit = Object.entries(ARTISTS).find(([k]) => q.includes(k));
+      return json({ artists: { items: hit ? [hit[1]] : [] } });
+    }
     if (path === "/search") {
       const q = (url.searchParams.get("q") ?? "").toLowerCase();
       const hit = Object.entries(SEARCH_RESULTS).find(([k]) => q.includes(k));
@@ -188,6 +222,8 @@ export async function mockApis(page: Page): Promise<void> {
         body: JSON.stringify({ id: "claude-haiku-5-5", type: "model" }),
       });
     }
+    // A deck request asks for artists; everything else asks for songs.
+    const deck = (route.request().postData() ?? "").includes("judged_artists");
     return route.fulfill({
       contentType: "application/json",
       headers: CORS,
@@ -197,7 +233,7 @@ export async function mockApis(page: Page): Promise<void> {
         role: "assistant",
         model: "claude-haiku-5-5",
         stop_reason: "end_turn",
-        content: [{ type: "text", text: JSON.stringify(CLAUDE_PICKS) }],
+        content: [{ type: "text", text: JSON.stringify(deck ? CLAUDE_ARTISTS : CLAUDE_PICKS) }],
         usage: { input_tokens: 1, output_tokens: 1 },
       }),
     });
