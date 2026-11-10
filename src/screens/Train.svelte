@@ -1,5 +1,6 @@
 <script lang="ts">
 import { prefetchDeck, takeDeck } from "../deckCache.js";
+import { type Command, DeckSync, type Playback } from "../deckPlayer.js";
 import { countryName, type Enrichment, enrich } from "../musicbrainz.js";
 import * as spotify from "../spotify.js";
 import { SpotifyError } from "../spotify.js";
@@ -8,6 +9,7 @@ import {
   type Card,
   DECK_SIZE,
   deckOutcome,
+  fillDeckPlaylist,
   judge,
   loadTrain,
   NO_PLAYLIST,
@@ -32,6 +34,10 @@ let inApp = $state(localStorage.getItem(IN_APP_KEY) !== "0");
 let embedPlaying = $state(false);
 /** The current card's embed didn't start on its own (the browser wants a tap). */
 let tapToPlay = $state(false);
+/** The whole deck in one player (one tap per deck); null = one player per card. */
+let deckPlayer = $state<string | null>(null);
+/** You tapped play in the deck player (iOS needs that one tap). */
+let deckStarted = $state(false);
 let deck = $state<Card[]>([]);
 /** The current deck's id (its "at"), for the Deck done stats. */
 let deckAt = $state(0);
@@ -71,9 +77,11 @@ const statusLine = $derived(
     inApp
       ? embedPlaying
         ? "Playing inside Géza"
-        : tapToPlay
-          ? "Tap ▶ on the card to start"
-          : "Starting…"
+        : deckPlayer && !deckStarted
+          ? "Tap ▶ on the player once: the rest of the deck plays by itself"
+          : tapToPlay
+            ? "Tap ▶ on the card to start"
+            : "Starting…"
       : "",
     startedIn !== null && device ? `Playing on ${device.name} · started in ${startedIn.toFixed(1)} s` : "",
     `${sessionYes} yes · ${sessionNo} no`,
@@ -120,6 +128,55 @@ let hint = $state("");
 
 const EMBED_ORIGIN = "https://open.spotify.com";
 const embedUrl = (id: string) => `${EMBED_ORIGIN}/embed/track/${encodeURIComponent(id)}?theme=0`;
+const playlistEmbedUrl = (id: string) => `${EMBED_ORIGIN}/embed/playlist/${encodeURIComponent(id)}?theme=0`;
+
+let sync: DeckSync | null = null;
+let lastPlayback: Playback | null = null;
+let stuckTimer: ReturnType<typeof setTimeout> | undefined;
+
+const send = (commands: Command[]) => {
+  for (const c of commands) toEmbed(c);
+};
+
+/** Fill "Géza · Deck" and switch to the one-player mode; on any failure, stay with a player per card. */
+async function setupDeckPlayer(cards: Card[], at: number) {
+  deckPlayer = null;
+  sync = null;
+  lastPlayback = null;
+  if (!data) return;
+  try {
+    const filled = await fillDeckPlaylist(
+      $state.snapshot(data) as TrainData,
+      cards.map((c) => c.track.uri),
+      app.profile,
+    );
+    if (deckAt !== at || !inApp) return;
+    data = filled.data;
+    sync = new DeckSync((i) => {
+      const c = deck[i];
+      return c ? Math.round(startPosition(c.track) / 1000) : 0;
+    });
+    sync.wanted = index;
+    deckStarted = false;
+    embedPlaying = false;
+    tapToPlay = false;
+    deckPlayer = filled.playlistId;
+  } catch {
+    // Missing permission (log in again) or Spotify refused: one player per card still works.
+  }
+}
+
+/** Skipping doesn't move the player (autoplay blocked after all): back to one player per card. */
+function watchSkip() {
+  clearTimeout(stuckTimer);
+  stuckTimer = setTimeout(() => {
+    if (sync?.stuck()) {
+      deckPlayer = null;
+      sync = null;
+      app.notify("Skipping in the deck player didn't work here, so each card gets its own player again.");
+    }
+  }, 4500);
+}
 
 // --- The embedded player -----------------------------------------------------
 // Spotify's embed speaks a small postMessage protocol (the one its iFrame API
@@ -137,6 +194,20 @@ $effect(() => {
   const onMessage = (e: MessageEvent) => {
     if (e.origin !== EMBED_ORIGIN || !embedEl || e.source !== embedEl.contentWindow) return;
     const data = e.data as { type?: string; payload?: { isPaused?: boolean; duration?: number } } | null;
+    if (data?.type === "playback_update" && sync) {
+      const p = (data.payload ?? {}) as Playback;
+      lastPlayback = p;
+      embedPlaying = p.isPaused === false;
+      if (embedPlaying) {
+        tapToPlay = false;
+        playingSince ??= Date.now();
+      }
+      const before = sync.playerIndex;
+      send(sync.update(p));
+      deckStarted = sync.started;
+      if (sync.playerIndex !== before) playingSince = Date.now();
+      return;
+    }
     if (data?.type === "ready") {
       toEmbed({ command: "load_complete_ack" });
       toEmbed({ command: "play" });
@@ -187,6 +258,7 @@ function chooseInApp() {
   playingSince = null;
   const current = deck[index];
   if (current) embedFor(current.track.id);
+  if (deck.length && !done) void setupDeckPlayer($state.snapshot(deck) as Card[], deckAt);
 }
 /** All Spotify devices, for the picker. */
 let devices = $state<spotify.Device[]>([]);
@@ -218,6 +290,8 @@ async function findDevice(): Promise<boolean> {
 }
 
 function choose(d: spotify.Device) {
+  deckPlayer = null;
+  sync = null;
   inApp = false;
   localStorage.setItem(IN_APP_KEY, "0");
   device = d;
@@ -334,6 +408,7 @@ async function start() {
   if (!built) return;
   deck = built.cards;
   deckAt = built.at;
+  if (inApp) void setupDeckPlayer(built.cards, built.at);
   data = await recordDeck(current, built);
   void enrichDeck(built.cards);
   index = 0;
@@ -369,7 +444,11 @@ function decide(verdict: Verdict) {
   if (verdict === "no") sessionNo++;
   // Start the next song right away; the card animation covers the wait.
   const next = index + 1;
-  if (next < deck.length) void playFrom(next);
+  if (sync && deckPlayer) {
+    send(sync.goTo(next));
+    watchSkip();
+    playingSince = null;
+  } else if (next < deck.length) void playFrom(next);
   else if (device) void spotify.pause(device.id).catch(() => {});
   const extra = $state.snapshot(details[judged.track.id] ?? { genres: [] }) as Enrichment;
   void judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell, extra).then((d) => {
@@ -483,6 +562,19 @@ $effect(() => {
     </div>
   {/if}
 
+  {#if deckPlayer && inApp && !done && !choosing}
+    <div class="deck-player">
+      <iframe
+        class="embed"
+        title="Deck player"
+        src={playlistEmbedUrl(deckPlayer)}
+        allow="encrypted-media; autoplay; clipboard-write"
+        loading="eager"
+        bind:this={embedEl}
+      ></iframe>
+    </div>
+  {/if}
+
   {#if card && !done && !choosing}
     <div class="deck">
       <div class="behind" aria-hidden="true"></div>
@@ -499,8 +591,8 @@ $effect(() => {
         onpointerup={up}
         onpointercancel={up}
       >
-        <div class="art" class:embedded={inApp}>
-          {#if inApp}
+        <div class="art" class:embedded={inApp && !deckPlayer}>
+          {#if inApp && !deckPlayer}
             {#key card.track.id}
               <iframe
                 class="embed"
@@ -516,10 +608,10 @@ $effect(() => {
           {:else}
             <div class="placeholder" aria-hidden="true"><Icon name="mixes" size={48} /></div>
           {/if}
-          {#if !inApp}
+          {#if !inApp || deckPlayer}
             <div class="playing small">
               <span class="mini-eq" aria-hidden="true"><span></span><span></span><span></span></span>
-              In Spotify · from {mmss(startPosition(card.track))}{#if playingSince} · listening {mmss(listened * 1000)}{/if}
+              {deckPlayer ? "Deck player" : "In Spotify"} · from {mmss(startPosition(card.track))}{#if playingSince} · listening {mmss(listened * 1000)}{/if}
             </div>
           {/if}
         </div>
@@ -712,6 +804,7 @@ $effect(() => {
   .art img { display: block; width: 100%; height: 100%; object-fit: cover; }
   .art.embedded { aspect-ratio: auto; height: 152px; background: var(--ink); }
   .embed { display: block; width: 100%; height: 152px; border: 0; }
+  .deck-player { margin-top: 12px; border-radius: 16px; overflow: hidden; background: var(--ink); }
   .device.inapp { border-style: dashed; }
   .hint { margin: 0 0 4px; font-weight: 600; }
   .placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }

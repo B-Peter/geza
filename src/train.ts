@@ -13,6 +13,7 @@ import { normalize, songKey } from "./text.js";
 export const DECK_SIZE = 15;
 export const YES_PLAYLIST = "Géza · Yes";
 export const NO_PLAYLIST = "Géza · No";
+export const DECK_PLAYLIST = "Géza · Deck";
 /** Where each song starts: past most intros, near the first chorus. */
 export const START_AT = 0.35;
 const DEFAULT_START_MS = 45_000;
@@ -66,6 +67,8 @@ export interface TrainData {
   playlistId: string | null;
   /** The private Spotify copy of the no list; null until the first no. */
   noPlaylistId?: string | null;
+  /** The current deck as a public playlist, for the one-tap player. */
+  deckPlaylistId?: string | null;
   /** Every swipe with the song's attributes and listening time (newest last). */
   history: Judgement[];
   /** The last decks, newest last. */
@@ -352,6 +355,41 @@ async function buildDeckByTitles(data: TrainData, l: Listening, known: Known, ha
   return deckFrom(found, data, { ...known, trackIds: new Set([...known.trackIds, ...liked]) }).filter(
     (c) => !haveKeys.has(songKey(c.track.artist, c.track.title)),
   );
+}
+
+/**
+ * Put the deck's songs into the "Géza · Deck" playlist (created on first
+ * use, public because Spotify's player won't play private playlists, and
+ * recreated if you deleted it). Returns the updated data and the playlist.
+ */
+export async function fillDeckPlaylist(
+  data: TrainData,
+  uris: string[],
+  profile: Profile | null,
+): Promise<{ data: TrainData; playlistId: string }> {
+  const create = async () => {
+    const me = profile ?? (await spotify.getProfile());
+    return (
+      await spotify.createPlaylist(
+        me.id,
+        DECK_PLAYLIST,
+        "The songs of your current Train deck in Géza. Replaced with every new deck.",
+        true,
+      )
+    ).id;
+  };
+  let playlistId = data.deckPlaylistId ?? (await create());
+  try {
+    await spotify.replacePlaylistTracks(playlistId, uris);
+  } catch (e) {
+    if (!(e instanceof spotify.SpotifyError) || ![403, 404].includes(e.status) || !data.deckPlaylistId)
+      throw e;
+    playlistId = await create();
+    await spotify.replacePlaylistTracks(playlistId, uris);
+  }
+  const next = { ...data, deckPlaylistId: playlistId };
+  await saveTrain(next);
+  return { data: next, playlistId };
 }
 
 /** Remember how a deck went (kept for the last 50 decks). */

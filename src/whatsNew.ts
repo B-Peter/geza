@@ -1,7 +1,8 @@
 // "Géza was updated" message: shown once after a new version is installed.
 // Update NEWS with each user-visible release (one short line).
 
-export const NEWS = "Train plays songs inside Géza now, starting on their own when a card appears.";
+export const NEWS =
+  "Train plays the whole deck in one player: tap ▶ once, every swipe moves to the next song. Reconnect Spotify once to allow it.";
 
 const SEEN_KEY = "ps.seenVersion";
 

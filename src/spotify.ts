@@ -18,6 +18,7 @@ export const REQUIRED_SCOPES = [
   "user-top-read", // top tracks and artists as taste signals
   "playlist-read-private", // read the mix playlists (they are private)
   "playlist-modify-private", // create and update them
+  "playlist-modify-public", // Train: Spotify's player only plays public playlists ("Géza · Deck")
   "user-library-read", // which songs in the mixes you've hearted
   "user-read-recently-played", // which songs in the mixes you've played
   "user-read-playback-state", // Train: find your Spotify app and check what's playing
@@ -421,8 +422,13 @@ async function playlistItemsCall<T>(playlistId: string, options: ApiOptions): Pr
   throw lastError;
 }
 
-export async function createPlaylist(userId: string, name: string, description: string): Promise<Playlist> {
-  const body = { name, description, public: false };
+export async function createPlaylist(
+  userId: string,
+  name: string,
+  description: string,
+  isPublic = false,
+): Promise<Playlist> {
+  const body = { name, description, public: isPublic };
   try {
     return await api<Playlist>("/me/playlists", { method: "POST", body });
   } catch (e) {

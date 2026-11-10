@@ -78,8 +78,11 @@ export const embed = {
 /** Playlists in the tester's Spotify library (none by default). */
 export const library = {
   playlists: [] as { id: string; name: string; tracks: unknown[] }[],
+  /** Refuse public playlists (a login without playlist-modify-public). */
+  noPublic: false,
   reset() {
     this.playlists = [];
+    this.noPublic = false;
   },
 };
 
@@ -155,7 +158,9 @@ export async function mockApis(page: Page): Promise<void> {
     if (path === "/me/top/tracks") return json({ items: PLAYLIST_TRACKS.slice(0, 3) });
     if (path === "/me/top/artists") return json({ items: [{ name: "Kestrel Lane" }] });
     if (path === "/me/playlists" && route.request().method() === "POST") {
-      const body = route.request().postDataJSON() as { name: string };
+      const body = route.request().postDataJSON() as { name: string; public?: boolean };
+      if (body.public && library.noPublic)
+        return json({ error: { message: "Insufficient client scope" } }, 403);
       return json({
         id: `pl-${body.name.replace(/\W+/g, "-").toLowerCase()}`,
         name: body.name,
@@ -304,13 +309,26 @@ export async function mockApis(page: Page): Promise<void> {
   await page.route(/^https:\/\/open\.spotify\.com\//, (route) =>
     route.fulfill({
       contentType: "text/html",
-      body: `<!doctype html><title>embed</title><button id="p">play</button><script>
+      body: `<!doctype html><title>embed</title><button id="p">play</button><p id="song">song 0</p><script>
+        // Like Spotify's player: one song at a time; seeking to the end moves on to the next one.
+        let song = 0, position = 0, paused = true;
         const tell = (m) => parent.postMessage(m, "*");
-        const playing = () => tell({ type: "playback_update", payload: { isPaused: false, position: 0, duration: 30000 } });
+        const update = () => {
+          document.getElementById("song").textContent = "song " + song + (paused ? " paused" : " playing");
+          tell({ type: "playback_update", payload: { isPaused: paused, position, duration: 30000 } });
+        };
+        const play = () => { paused = false; position = Math.max(position, 1000); update(); };
         addEventListener("message", (e) => {
-          if (e.data && e.data.command === "play" && ${embed.autoplay}) playing();
+          const c = e.data && e.data.command;
+          if (c === "play" && ${embed.autoplay}) play();
+          if (c === "resume") { paused = false; update(); }
+          if (c === "pause") { paused = true; update(); }
+          if (c === "seek") {
+            if (e.data.timestamp >= 28) { song++; position = 0; } else position = e.data.timestamp * 1000;
+            update();
+          }
         });
-        document.getElementById("p").onclick = playing;
+        document.getElementById("p").onclick = play;
         tell({ type: "ready" });
       </script>`,
     }),
@@ -338,7 +356,7 @@ export interface SeedOptions {
 }
 
 export const ALL_SCOPES =
-  "user-read-private user-top-read playlist-read-private playlist-modify-private user-library-read user-read-recently-played user-read-playback-state user-modify-playback-state";
+  "user-read-private user-top-read playlist-read-private playlist-modify-private playlist-modify-public user-library-read user-read-recently-played user-read-playback-state user-modify-playback-state";
 
 /** Put the app into a state by writing straight to its storage (dev server only). */
 export async function seed(page: Page, opts: SeedOptions): Promise<void> {

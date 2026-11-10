@@ -112,6 +112,7 @@ test("security: the Spotify login asks only for the scopes the app uses", async 
   expect(url.searchParams.get("scope")?.split(" ").sort()).toEqual(
     [
       "playlist-modify-private",
+      "playlist-modify-public",
       "playlist-read-private",
       "user-library-read",
       "user-modify-playback-state",

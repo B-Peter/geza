@@ -278,8 +278,17 @@ test("train: by default plays inside Géza and starts each card on its own", asy
   await expect(page.getByRole("button", { name: "Play on: inside Géza · Change" })).toBeVisible();
 });
 
-test("train: when the browser blocks autoplay, it asks for a tap on the player", async ({ page }) => {
+test("train: without the deck playlist, each card has a player and asks for a tap", async ({
+  page,
+  errors,
+}) => {
   embed.autoplay = false;
+  library.noPublic = true;
+  // Spotify refuses the public playlist (403); the app then tries the older playlist route (404 here).
+  const expected = /status of 40[34]/;
+  page.on("console", () => {
+    for (let i = errors.length - 1; i >= 0; i--) if (expected.test(errors[i] ?? "")) errors.splice(i, 1);
+  });
   await seed(page, embedded);
   await open(page, "./#/train");
   await page.getByRole("button", { name: "Start a deck" }).click();
@@ -304,4 +313,34 @@ test("train: you can switch to the Spotify app, and back", async ({ page }) => {
     .getByRole("button", { name: /Inside Géza/ })
     .click();
   await expect(page.getByText(/Playing inside Géza/)).toBeVisible();
+});
+
+test("train: the whole deck plays in one player; one tap, then each swipe moves it on", async ({ page }) => {
+  embed.autoplay = false; // like iOS: nothing plays before a tap inside the player
+  await seed(page, embedded);
+  await open(page, "./#/train");
+  const created = page.waitForRequest((r) => r.method() === "POST" && r.url().endsWith("/me/playlists"));
+  const filled = page.waitForRequest(
+    (r) => r.method() === "PUT" && /\/playlists\/[^/]+\/items$/.test(r.url()),
+  );
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  expect((await created).postDataJSON()).toMatchObject({ name: "Géza · Deck", public: true });
+  expect((await filled).postDataJSON()).toEqual({ uris: ["spotify:track:t101", "spotify:track:t102"] });
+
+  const player = page.locator(".deck-player iframe");
+  await expect(player).toHaveAttribute("src", /open\.spotify\.com\/embed\/playlist\/pl-g-za-deck/);
+  // The cards show covers, not players of their own.
+  await expect(page.getByRole("article", { name: /Long Way Round/ }).locator("iframe")).toHaveCount(0);
+  await expect(page.getByText(/Tap ▶ on the player once/)).toBeVisible();
+
+  // The one tap.
+  const inside = page.frameLocator(".deck-player iframe");
+  await inside.getByRole("button", { name: "play" }).click();
+  await expect(inside.getByText("song 0 playing")).toBeVisible();
+  await expect(page.getByText(/Playing inside Géza/)).toBeVisible();
+
+  // A swipe moves the same player on, no new tap needed.
+  await page.getByRole("button", { name: "Yes, I like it" }).click();
+  await expect(page.getByRole("article", { name: /Open Window/ })).toBeVisible();
+  await expect(inside.getByText("song 1 playing")).toBeVisible();
 });

@@ -31,7 +31,7 @@ test("learning: plays are counted once, not again on the next open", async ({ pa
 test("learning: an older login is asked to reconnect for the new permissions", async ({ page }) => {
   await seed(page, { loggedIn: true, claudeKey: true, playlists: true, oldLogin: true });
   await open(page, "./#/");
-  await expect(page.getByText("Let Géza learn from your listening")).toBeVisible();
+  await expect(page.getByText("Géza needs a new Spotify permission", { exact: false })).toBeVisible();
   // Nothing is learned without the permissions.
   await expect(page.getByText(/Learned from your listening:/)).toHaveCount(0);
   const auth = page.waitForRequest((r) => r.url().startsWith("https://accounts.spotify.com/authorize"));
@@ -40,4 +40,5 @@ test("learning: an older login is asked to reconnect for the new permissions", a
   const scopes = new URL((await auth).url()).searchParams.get("scope")?.split(" ") ?? [];
   expect(scopes).toContain("user-library-read");
   expect(scopes).toContain("user-read-recently-played");
+  expect(scopes).toContain("playlist-modify-public");
 });
