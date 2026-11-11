@@ -1,10 +1,14 @@
-/** Lowercase, strip accents and punctuation, collapse spaces. */
+/**
+ * Lowercase, strip accents and punctuation, collapse spaces. Letters and
+ * digits of every script are kept: a name in Cyrillic, Japanese or Arabic
+ * must not come out empty, or all such names would look like the same one.
+ */
 export const normalize = (s: string): string =>
   s
     .toLowerCase()
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
 
 /** Title without version suffixes like " - Remastered 2011" or " (Live)". */

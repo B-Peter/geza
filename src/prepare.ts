@@ -17,6 +17,7 @@ import {
   addBlocked,
   applySwap,
   balance,
+  capAdditions,
   filterAdditions,
   matchRemovals,
   type Resolved,
@@ -129,6 +130,8 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
     missing = [...missing, ...more.missing];
   }
 
+  // Claude may name fewer usable removals than asked: then fewer songs go in too.
+  add = capAdditions(add, removals, current);
   if (add.length === 0) throw new Error("None of Claude's picks could be used. Try again.");
 
   const swap: PendingSwap = {

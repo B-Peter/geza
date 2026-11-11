@@ -11,10 +11,13 @@ vi.mock("../src/store.js", () => ({
 /** Lets the test hand Claude's artists over one at a time, like a stream. */
 let sendArtist: ((name: string) => void) | null = null;
 let endStream: () => void = () => {};
+/** When set, every request to Claude fails with this message. */
+let claudeError: string | null = null;
 vi.mock("../src/claude.js", () => ({
   curate: async () => ({ add: [], remove: [] }),
   streamArtists: (input: { focus: string }, onPick: (p: unknown) => void) =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
+      if (claudeError) return reject(new Error(claudeError));
       // Only one of the three batches answers; the others return nothing.
       if (input.focus !== "close") return resolve([]);
       sendArtist = (name) => onPick({ artist: name, want: "hit", reason: "r", tags: ["rock"] });
@@ -28,6 +31,8 @@ vi.mock("../src/spotify.js", () => ({
   getRecentlyPlayed: async () => ({ plays: [], complete: true }),
   likedAmong: async () => new Set<string>(),
   rateLimitWaitMs: () => 0,
+  SessionExpiredError: class extends Error {},
+  SpotifyError: class extends Error {},
   findAll: async () => [],
   findArtist: async (name: string) => ({ id: name }),
   artistTopTracks: async (id: string) => [
@@ -66,5 +71,11 @@ describe("buildDeck", () => {
     // The whole rest still arrives too (it's what gets saved on the device).
     const rest = await deck.rest;
     expect(rest?.map((c) => c.track.artist).slice(0, 2)).toEqual(["C", "D"]);
+  });
+
+  it('says what went wrong with Claude instead of "nothing found"', async () => {
+    claudeError = "Your Anthropic account is out of credit.";
+    await expect(buildDeck(empty)).rejects.toThrow("Your Anthropic account is out of credit.");
+    claudeError = null;
   });
 });

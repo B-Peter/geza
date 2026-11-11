@@ -261,7 +261,7 @@ Rules:
   land.
 - Spread the genres. A deck that is all one genre teaches nothing about
   the rest of their taste. In this answer no more than 2 artists may share
-  a main genre (3 when focus is "close"). For "adjacent", every artist's
+  a main genre (3 in a "close" answer). For "adjacent", every artist's
   main genre must differ from the genre that dominates "loved" and
   "top_artists". For "wildcard", pick genres that appear nowhere in
   "loved", "top_artists" or "taste.liked_tags", each artist a different

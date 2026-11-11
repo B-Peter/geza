@@ -224,7 +224,10 @@ async function artistTracks(pick: ArtistPick): Promise<Track[]> {
   try {
     const artist = await spotify.findArtist(pick.artist);
     return artist ? await spotify.artistTopTracks(artist.id) : [];
-  } catch {
+  } catch (e) {
+    // Not about this artist: the login ran out, or Spotify's rate limit. The deck must say so.
+    if (e instanceof spotify.SessionExpiredError) throw e;
+    if (e instanceof spotify.SpotifyError && [401, 429].includes(e.status)) throw e;
     // Treated as not found; the deck is built from the rest.
     return [];
   }
@@ -427,6 +430,13 @@ export async function buildDeck(
     announce(fresh);
     if (cards.length >= FIRST_CARDS) enough();
   };
+  // The first thing that went wrong (key rejected, no credit, login expired,
+  // rate limit). A deck that still gets cards doesn't mention it; an empty
+  // deck reports this instead of "nothing found".
+  let failure: unknown = null;
+  const failed = (e: unknown) => {
+    failure ??= e;
+  };
   /** One answer from Claude: lookups run side by side, cards are dealt in Claude's order. */
   const batch = async ({ focus, count }: { focus: DeckFocus; count: number }) => {
     let dealt = Promise.resolve();
@@ -437,8 +447,10 @@ export async function buildDeck(
       }
       if (cards.length >= DECK_SIZE) return;
       const found = lookUp(pick);
-      dealt = dealt.then(async () => deal(await found)).catch(() => {});
-    }).catch(() => []);
+      // The lookup may fail before its turn in the chain: never an unhandled rejection.
+      found.catch(() => {});
+      dealt = dealt.then(async () => deal(await found)).catch(failed);
+    }).catch(failed);
     await dealt;
   };
   const all = Promise.all(BATCHES.map(batch));
@@ -461,7 +473,10 @@ export async function buildDeck(
     if (cards.length < MIN_DECK) {
       const known = await knownFrom(data, listening, []);
       const artists = new Set(cards.map((c) => firstArtist(c.track.artist)));
-      const more = await buildDeckByTitles(judgedData, listening, known, cards).catch(() => []);
+      const more = await buildDeckByTitles(judgedData, listening, known, cards).catch((e): Card[] => {
+        failed(e);
+        return [];
+      });
       for (const c of more) {
         if (cards.length >= DECK_SIZE) break;
         if (artists.has(firstArtist(c.track.artist))) continue;
@@ -476,7 +491,10 @@ export async function buildDeck(
   };
   if (first.length === 0) {
     const restCards = await finish();
-    if (restCards.length === 0) throw new Error("None of Claude's picks were found on Spotify. Try again.");
+    if (restCards.length === 0) {
+      if (failure) throw failure instanceof Error ? failure : new Error(String(failure));
+      throw new Error("None of Claude's picks were found on Spotify. Try again.");
+    }
     return { ...deck, cards: restCards, asked: stats.asked, found: stats.found };
   }
   deck.rest = finish();

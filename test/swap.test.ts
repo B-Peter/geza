@@ -5,6 +5,7 @@ import {
   addBlocked,
   applySwap,
   balance,
+  capAdditions,
   filterAdditions,
   matchRemovals,
   swapCounts,
@@ -30,6 +31,33 @@ describe("songKey", () => {
       songKey("beyonce", "Crazy In Love"),
     );
     expect(songKey("Queen", "Bohemian Rhapsody (Live)")).toBe(songKey("Queen", "Bohemian Rhapsody"));
+  });
+});
+
+describe("songKey in other scripts", () => {
+  it("keeps songs with non-Latin names apart", () => {
+    expect(songKey("Земфира", "Хочешь?")).not.toBe(songKey("Кино", "Группа крови"));
+    expect(songKey("宇多田ヒカル", "First Love")).not.toBe(songKey("椎名林檎", "First Love"));
+    expect(songKey("Земфира", "Хочешь?")).toBe(songKey("ЗЕМФИРА", "хочешь"));
+  });
+});
+
+describe("a mix never grows past its size", () => {
+  const entry = (n: number) => ({ track: track(n), reason: "" });
+  it("lets in no more songs than go out", () => {
+    const add = [101, 102, 103, 104].map(entry);
+    expect(capAdditions(add, [entry(1), entry(2)], tracks(25), 25)).toHaveLength(2);
+  });
+  it("still fills what is missing", () => {
+    const add = [101, 102, 103, 104].map(entry);
+    expect(capAdditions(add, [entry(1)], tracks(23), 25)).toHaveLength(3);
+  });
+  it("brings an oversized mix back down at the next swap", () => {
+    // 28 songs: 30% is 8, plus the 3 too many go out; 8 come in.
+    expect(swapCounts(mixOf("driving", { mode: "tweak" }), tracks(28), 25)).toEqual({ remove: 11, add: 8 });
+    const remove = Array.from({ length: 11 }, (_, i) => entry(i + 1));
+    const add = Array.from({ length: 8 }, (_, i) => entry(i + 101));
+    expect(balance(remove, add, tracks(28), 25)).toHaveLength(11);
   });
 });
 

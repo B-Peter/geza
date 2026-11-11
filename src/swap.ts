@@ -19,8 +19,26 @@ export function swapCounts(mix: Mix, current: Track[], size = MIX_SIZE): SwapCou
   const lockedIds = new Set(mix.locked.map((t) => t.id));
   const swappable = current.filter((t) => !lockedIds.has(t.id)).length;
   const pct = SWAP_PCT[mix.id][mix.mode];
-  const remove = Math.min(swappable, Math.round((current.length * pct) / 100));
-  return { remove, add: remove + deficit };
+  // A mix that grew past its size (songs you added, songs kept in Review)
+  // comes back down: the extra ones go out without a replacement.
+  const surplus = Math.max(0, current.length - size);
+  const remove = Math.min(swappable, Math.round((current.length * pct) / 100) + surplus);
+  return { remove, add: Math.max(0, remove - surplus) + deficit };
+}
+
+/**
+ * Never grow the mix: no more songs go in than come out (plus what's missing
+ * to reach the full size, minus what the mix has too many of).
+ */
+export function capAdditions(
+  add: SwapEntry[],
+  remove: SwapEntry[],
+  current: Track[],
+  size = MIX_SIZE,
+): SwapEntry[] {
+  const deficit = Math.max(0, size - current.length);
+  const surplus = Math.max(0, current.length - size);
+  return add.slice(0, Math.max(0, remove.length - surplus) + deficit);
 }
 
 const keyOf = (t: { artist: string; title: string }) => songKey(t.artist, t.title);
@@ -88,7 +106,9 @@ export function balance(
   size = MIX_SIZE,
 ): SwapEntry[] {
   const deficit = Math.max(0, size - current.length);
-  const allowed = Math.max(0, add.length - deficit);
+  // Songs over the full size may go out without a replacement.
+  const surplus = Math.max(0, current.length - size);
+  const allowed = Math.max(0, add.length - deficit) + surplus;
   return remove.slice(0, allowed);
 }
 
