@@ -16,7 +16,7 @@ async function create() {
 
 <main class="screen">
   <h1>Your four mixes</h1>
-  <p class="lead">These private playlists are created in your Spotify library. The app fills them and refreshes them each week.</p>
+  <p class="lead">These private playlists are created in your Spotify library. Géza fills them, and swaps songs in and out whenever you ask.</p>
 
   <div class="card list">
     {#each app.mixes as mix (mix.id)}

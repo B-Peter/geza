@@ -10,7 +10,8 @@ type Name =
   | "arrow"
   | "check"
   | "undo"
-  | "key";
+  | "key"
+  | "discover";
 let { name, size = 20 }: { name: Name; size?: number } = $props();
 </script>
 
@@ -35,6 +36,7 @@ let { name, size = 20 }: { name: Name; size?: number } = $props();
   {:else if name === "arrow"}<path d="M5 12h14M13 6l6 6-6 6" />
   {:else if name === "check"}<path d="M5 12l4 4 10-10" />
   {:else if name === "undo"}<path d="M9 14L4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 0 10h-3" />
+  {:else if name === "discover"}<circle cx="12" cy="12" r="9" /><path d="M15.5 8.5l-2 5-5 2 2-5 5-2z" />
   {:else if name === "key"}<circle cx="8" cy="15" r="4" /><path d="M11 12l9-9M16 7l3 3M14 9l2 2" />
   {/if}
 </svg>

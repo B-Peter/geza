@@ -483,6 +483,17 @@ export async function addToPlaylist(playlistId: string, uris: string[]): Promise
   }
 }
 
+/**
+ * Take songs out of a playlist. Both spellings of the list are sent: which
+ * one Spotify reads depends on the endpoint ("items" or the older "tracks").
+ */
+export async function removeFromPlaylist(playlistId: string, uris: string[]): Promise<void> {
+  for (const part of chunk(uris, 100)) {
+    const list = part.map((uri) => ({ uri }));
+    await playlistItemsCall(playlistId, { method: "DELETE", body: { tracks: list, items: list } });
+  }
+}
+
 function chunk<T>(list: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));

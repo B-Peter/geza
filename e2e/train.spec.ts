@@ -130,7 +130,7 @@ test("train: with several devices you pick one, and Géza remembers it", async (
   await seed(page, ready);
   await open(page, "./#/train");
   await page.getByRole("button", { name: "Start a deck" }).click();
-  const picker = page.getByRole("region", { name: "Where should Train play?" });
+  const picker = page.getByRole("region", { name: "Where should the deck play?" });
   await expect(picker).toBeVisible();
   await expect(picker.getByRole("button", { name: /MacBook.*Computer · active now/ })).toBeVisible();
   // A device Spotify won't let apps control can't be picked.
@@ -144,11 +144,11 @@ test("train: with several devices you pick one, and Géza remembers it", async (
   await open(page, "./#/train");
   await page.getByRole("button", { name: "Start a deck" }).click();
   await expect(page.getByText(/Playing on MacBook · started in/)).toBeVisible();
-  await expect(page.getByRole("region", { name: "Where should Train play?" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Where should the deck play?" })).toHaveCount(0);
   // And you can switch while swiping.
   await page.getByRole("button", { name: "Play on: MacBook · Change" }).click();
   await page
-    .getByRole("region", { name: "Where should Train play?" })
+    .getByRole("region", { name: "Where should the deck play?" })
     .getByRole("button", { name: /iPhone/ })
     .click();
   await expect(page.getByText(/Playing on iPhone · started in/)).toBeVisible();
@@ -221,7 +221,7 @@ test("train: one real song per artist Claude names; the start screen shows how t
   await expect(page.getByRole("article", { name: /Open Window/ })).toBeVisible();
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(page.getByText("Deck done")).toBeVisible();
-  await expect(page.getByText("Skipped songs may come back")).toBeVisible();
+  await expect(page.getByText("Skipped songs don't count either way.")).toBeVisible();
   // Back on the start screen: Nobody Band wasn't on Spotify.
   await open(page, "./#/train");
   await expect(page.getByTestId("last-deck")).toHaveText(
@@ -313,4 +313,28 @@ test("train: the deck plays from the “Géza · Deck” playlist; asleep, Spoti
   await expect(page.getByRole("article", { name: /Open Window/ })).toBeVisible();
   await expect.poll(() => player.plays.at(-1)?.uris).toEqual(["spotify:track:t102"]);
   for (let i = errors.length - 1; i >= 0; i--) if (expected.test(errors[i] ?? "")) errors.splice(i, 1);
+});
+
+test("train: the last swipe can be taken back", async ({ page }) => {
+  await seed(page, ready);
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  await expect(page.getByRole("article", { name: "Long Way Round by Fifth Gear" })).toBeVisible();
+  await page.getByRole("button", { name: "No, never suggest it" }).click();
+  await expect(page.getByRole("article", { name: /Open Window/ })).toBeVisible();
+
+  await page.getByRole("button", { name: "Undo no: Long Way Round" }).click();
+  // The song is the card again, and nothing of the swipe is left.
+  await expect(page.getByRole("article", { name: "Long Way Round by Fifth Gear" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Undo/ })).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const load = (path: string) => import(/* @vite-ignore */ path);
+        const store = await load("/src/store.ts");
+        const train = await store.get("train");
+        return { history: train.history.length, no: train.no.length };
+      }),
+    )
+    .toEqual({ history: 0, no: 0 });
 });

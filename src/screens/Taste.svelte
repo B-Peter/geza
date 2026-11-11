@@ -1,7 +1,16 @@
 <script lang="ts">
 import { countryName } from "../musicbrainz.js";
 import { app } from "../state.svelte.js";
-import { buildTaste, type Dimension, explain, MIN_JUDGED, mutedKey, type Standing } from "../taste.js";
+import {
+  buildTaste,
+  type Dimension,
+  explain,
+  MIN_COUNT,
+  MIN_DISLIKE_COUNT,
+  MIN_JUDGED,
+  mutedKey,
+  type Standing,
+} from "../taste.js";
 import { loadTrain, setMuted, type TrainData } from "../train.js";
 import BackButton from "../ui/BackButton.svelte";
 
@@ -27,6 +36,10 @@ const sections: { dim: Dimension; title: string; hint: string }[] = [
 function ranked(list: Standing[]): Standing[] {
   return list.filter((s) => Math.abs(s.score) >= 0.5).sort((a, b) => b.score - a.score);
 }
+
+/** Enough no's behind it that Géza really avoids it (see buildTaste). */
+const avoided = (dim: Dimension, s: Standing) =>
+  s.score < 0 && s.count >= (dim === "artist" ? MIN_COUNT : MIN_DISLIKE_COUNT);
 
 const label = (dim: Dimension, key: string) => (dim === "country" ? countryName(key.toUpperCase()) : key);
 
@@ -57,7 +70,7 @@ const readouts = $derived(
 );
 </script>
 
-<BackButton href="#/settings" label="Back to settings" />
+<BackButton href="#/train" label="Back to Discover" />
 
 <main class="screen">
   <h1>What Géza learned</h1>
@@ -65,13 +78,14 @@ const readouts = $derived(
     <p class="lead">Loading…</p>
   {:else if profile.judged < MIN_JUDGED}
     <p class="lead">
-      Nothing yet: Géza needs at least {MIN_JUDGED} swipes in Train before it reads anything into them.
+      Nothing yet: Géza needs at least {MIN_JUDGED} swipes in Discover before it reads anything into them.
     </p>
-    <a class="btn" href="#/train">Open Train</a>
+    <a class="btn" href="#/train">Open Discover</a>
   {:else}
     <p class="lead">
-      From {profile.judged} swipes. Green is what you keep saying yes to, red what you say no to. Tap a label to
-      switch it off if Géza got it wrong; tap again to switch it back on.
+      From {profile.judged} swipes. Green is what you keep saying yes to, red what Géza now avoids (three no's or
+      more); white leans to no but isn't decided yet. Tap a label to switch it off if Géza got it wrong; tap again
+      to switch it back on.
     </p>
     {#if readouts.length}
       <div class="card readouts">
@@ -90,7 +104,7 @@ const readouts = $derived(
             <button
               class="chip"
               class:liked={st.score > 0}
-              class:disliked={st.score < 0}
+              class:disliked={avoided(s.dim, st)}
               class:off
               aria-pressed={!off}
               title={st.songs.join(", ")}

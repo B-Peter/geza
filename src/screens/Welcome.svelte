@@ -27,8 +27,8 @@ async function login() {
       <div class="tile tall"><Cover id="home" /></div>
     </div>
   </div>
-  <h1 class="headline">Your music, tuned every week.</h1>
-  <p class="lead">Spotify keeps your playlists. Claude picks the songs, fresh every week.</p>
+  <h1 class="headline">New music, picked for you.</h1>
+  <p class="lead">Claude finds artists you don't know and keeps four mixes fresh. Spotify plays them.</p>
 
   {#if needsClientId}
     <label class="label" for="client-id">Spotify client ID</label>

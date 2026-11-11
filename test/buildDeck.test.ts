@@ -79,3 +79,28 @@ describe("buildDeck", () => {
     claudeError = null;
   });
 });
+
+describe("unjudge", () => {
+  it("takes a swipe back off the history and its list", async () => {
+    const { unjudge } = await import("../src/train.js");
+    const song = { id: "s1", uri: "u:s1", artist: "A", title: "One" };
+    const other = { id: "s2", uri: "u:s2", artist: "B", title: "Two" };
+    const swipe = (t: typeof song, verdict: "yes" | "no") => ({
+      artist: t.artist,
+      title: t.title,
+      verdict,
+      tags: [],
+      dwellMs: 0,
+      at: 1,
+    });
+    const data = {
+      yes: [other, song],
+      no: [],
+      playlistId: null,
+      history: [swipe(other, "yes"), swipe(song, "yes")],
+    };
+    const next = await unjudge(data, { track: song, reason: "", tags: [] }, "yes");
+    expect(next.yes).toEqual([other]);
+    expect(next.history.map((j) => j.title)).toEqual(["Two"]);
+  });
+});

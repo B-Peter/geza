@@ -1,5 +1,7 @@
 <script lang="ts">
-import type { Mix } from "../mixes.js";
+import { loadLedger } from "../ledger.js";
+import { loadPending, type Mix, type MixId } from "../mixes.js";
+import { fillMix } from "../prepare.js";
 import * as spotify from "../spotify.js";
 import { openUri } from "../spotify.js";
 import { app } from "../state.svelte.js";
@@ -8,16 +10,75 @@ import Cover from "../ui/Cover.svelte";
 import Icon from "../ui/Icon.svelte";
 import TabBar from "../ui/TabBar.svelte";
 
+const now = Date.now();
+const DAY_MS = 24 * 3_600_000;
+/** After this many days a mix that changes is due for a swap. */
+const DUE_DAYS = 7;
+
 /** How many swipes Géza has to go on; null while loading. */
 let swipes = $state<number | null>(null);
 $effect(() => {
   void loadTrain().then((d) => (swipes = d.history.length));
 });
 
-const status = (mix: Mix) =>
-  app.pending[mix.id]
-    ? "Swap ready"
-    : { keep: "Kept as is", tweak: "Tweaks weekly", renew: "Fresh weekly" }[mix.mode];
+/** Songs in each mix as Géza last saw it; missing while that isn't known yet. */
+let sizes = $state<Partial<Record<MixId, number>>>({});
+async function loadSizes() {
+  const next: Partial<Record<MixId, number>> = {};
+  for (const m of app.mixes) {
+    const known = (await loadLedger(m.id)).known;
+    if (known) next[m.id] = known.length;
+  }
+  sizes = next;
+}
+// Learning reads the playlists: the sizes are fresh after it.
+$effect(() => {
+  void app.learned;
+  void loadSizes();
+});
+
+const empty = $derived(app.mixes.filter((m) => sizes[m.id] === 0));
+
+const daysSince = (mix: Mix) => (mix.lastAppliedAt ? Math.floor((now - mix.lastAppliedAt) / DAY_MS) : null);
+const due = (mix: Mix) => mix.mode !== "keep" && sizes[mix.id] !== 0 && (daysSince(mix) ?? 0) >= DUE_DAYS;
+
+function status(mix: Mix): string {
+  if (app.pending[mix.id]) return "Swap ready";
+  if (sizes[mix.id] === 0) return "Empty";
+  if (mix.mode === "keep") return "Kept as is";
+  const days = daysSince(mix);
+  if (days === null) return "No swap yet";
+  if (days >= DUE_DAYS) return "Swap due";
+  return days === 0 ? "Swapped today" : days === 1 ? "Swapped yesterday" : `Swapped ${days} days ago`;
+}
+
+/** Fill every empty mix, one after the other. Nothing is in them, so there is nothing to review. */
+async function fillAll() {
+  const todo = empty.map((m) => m.id);
+  let filled = 0;
+  await app.task("Starting…", async (progress) => {
+    for (const [i, id] of todo.entries()) {
+      const mix = $state.snapshot(app.mix(id)) as Mix;
+      const step = todo.length > 1 ? `${mix.name} (${i + 1} of ${todo.length}): ` : "";
+      const updated = await fillMix(mix, (m) => progress(step + m));
+      if (!updated) {
+        // It wasn't empty after all: the swap waits for a review.
+        app.pending[id] = (await loadPending(id)) ?? undefined;
+        continue;
+      }
+      delete app.pending[id];
+      await app.updateMix(id, {
+        lastAppliedAt: updated.lastAppliedAt,
+        blocked: updated.blocked,
+        reasons: updated.reasons,
+      });
+      filled++;
+    }
+  });
+  await loadSizes();
+  if (filled > 0)
+    app.notify(filled === 1 ? "Mix filled in Spotify." : `${filled} mixes filled in Spotify.`, "ok");
+}
 
 const first = $derived(app.mixes[0]);
 </script>
@@ -37,6 +98,32 @@ const first = $derived(app.mixes[0]);
     </div>
   {/if}
 
+  {#if swipes === 0}
+    <a class="card row random nudge" href="#/train">
+      <span class="ico"><Icon name="discover" size={20} /></span>
+      <span class="grow">
+        <span class="title">Start with Discover</span>
+        <span class="small">No swipes yet: do one deck first, so Géza knows your taste, not just your top tracks</span>
+      </span>
+      <Icon name="arrow" size={20} />
+    </a>
+  {/if}
+
+  {#if empty.length > 0}
+    <div class="card reconnect" role="status">
+      <div class="reconnect-title">
+        {empty.length === app.mixes.length ? "Your mixes are empty" : empty.length === 1 ? `${empty[0]?.name} is empty` : `${empty.length} mixes are empty`}
+      </div>
+      <p class="small muted">
+        Claude picks 25 songs for {empty.length === 1 ? "it" : "each"}, from your listening and your swipes.
+        {empty.length > 1 ? "This takes a minute or two." : ""}
+      </p>
+      <button class="btn small" onclick={fillAll} disabled={!!app.busy}>
+        {empty.length === 1 ? "Fill it" : `Fill all ${empty.length}`}
+      </button>
+    </div>
+  {/if}
+
   <div class="grid">
     {#each app.mixes as mix (mix.id)}
       <div class="tile mix-{mix.id}">
@@ -44,9 +131,9 @@ const first = $derived(app.mixes[0]);
         <a class="hit" href={`#/mix/${mix.id}`} aria-label={`${mix.name} settings`}></a>
         <div class="meta">
           <div class="name">{mix.name}</div>
-          <div class="status" class:ready={app.pending[mix.id]}>{status(mix)}</div>
+          <div class="status" class:ready={app.pending[mix.id] || due(mix)}>{status(mix)}</div>
         </div>
-        {#if mix.playlistId}
+        {#if mix.playlistId && sizes[mix.id] !== 0}
           <a class="play" href={openUri(mix.playlistId)} aria-label={`Play ${mix.name} in Spotify`}><Icon name="play" size={18} /></a>
         {/if}
       </div>
@@ -66,19 +153,6 @@ const first = $derived(app.mixes[0]);
       {#if !app.learned.complete}Some plays were missed; open Géza every day or two.{/if}
     </p>
   {/if}
-
-  <a class="card row random" class:nudge={swipes === 0} href="#/train">
-    <span class="ico"><Icon name="check" size={20} /></span>
-    <span class="grow">
-      <span class="title">Train Géza</span>
-      {#if swipes === 0}
-        <span class="small">No swipes yet: do one deck first, so Géza knows your taste, not just your top tracks</span>
-      {:else}
-        <span class="small muted">Swipe songs to teach it your taste</span>
-      {/if}
-    </span>
-    <Icon name="arrow" size={20} />
-  </a>
 
   <a class="card row random" href="#/random">
     <span class="ico"><Icon name="sparkle" size={20} /></span>

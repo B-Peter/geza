@@ -18,11 +18,13 @@ import {
   restoreFromSpotify,
   startPosition,
   type TrainData,
+  unjudge,
   type Verdict,
   YES_PLAYLIST,
 } from "../train.js";
 import BackButton from "../ui/BackButton.svelte";
 import Icon from "../ui/Icon.svelte";
+import TabBar from "../ui/TabBar.svelte";
 
 let data = $state<TrainData | null>(null);
 let deck = $state<Card[]>([]);
@@ -51,6 +53,10 @@ let sessionYes = $state(0);
 let sessionNo = $state(0);
 /** More cards on their way (the deck starts before Claude has finished). */
 let more = $state(false);
+/** The swipe that can still be taken back (only the latest one). */
+let last = $state<{ card: Card; verdict: Verdict; at: number } | null>(null);
+/** Swipes are saved one after the other, each on top of the one before. */
+let saving: Promise<void> = Promise.resolve();
 /** MusicBrainz details per track id, filled in the background. */
 let details = $state<Record<string, Enrichment>>({});
 
@@ -68,6 +74,8 @@ function enrichDeck(cards: Card[]) {
 
 const card = $derived(deck[index] ?? null);
 const done = $derived(deck.length > 0 && index >= deck.length && !more);
+/** A deck is on the screen: the tab bar makes way for the card and its buttons. */
+const swiping = $derived(deck.length > 0 && !done);
 const extra = $derived(card ? details[card.track.id] : undefined);
 /** The album's first release year, when this is a later version. */
 const firstYear = $derived(
@@ -330,6 +338,7 @@ async function start() {
   prepareDeckPlaylist(built.cards);
   enrichDeck(built.cards);
   index = 0;
+  last = null;
   sessionYes = 0;
   sessionNo = 0;
   if (built.rest) addRest(built, built.at);
@@ -367,18 +376,43 @@ function decide(verdict: Verdict) {
     void spotify.pause(device.id).catch(() => {});
   }
   const extra = $state.snapshot(details[judged.track.id] ?? { genres: [] }) as Enrichment;
-  void judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell, extra).then((d) => {
-    data = { ...d, deckPlaylistId: data?.deckPlaylistId ?? d.deckPlaylistId };
-    // Near the end of a deck, prepare the next one with your latest swipes.
-    if (!more && deck.length - next <= 5)
-      prefetchDeck(d, { at: deckAt, cards: $state.snapshot(deck.slice(next)) as Card[] });
-  });
+  last = { card: judged, verdict, at: index };
+  // In a chain: a swipe saved from stale data would wipe out the one before it.
+  saving = saving
+    .then(async () => {
+      if (!data) return;
+      const d = await judge($state.snapshot(data) as TrainData, judged, verdict, app.profile, dwell, extra);
+      data = { ...d, deckPlaylistId: data?.deckPlaylistId ?? d.deckPlaylistId };
+      // Near the end of a deck, prepare the next one with your latest swipes.
+      if (!more && deck.length - next <= 5)
+        prefetchDeck(d, { at: deckAt, cards: $state.snapshot(deck.slice(next)) as Card[] });
+    })
+    .catch(() => {});
   setTimeout(() => {
     index = next;
     leaving = null;
     if (cardEl) cardEl.style.transform = "";
   }, 260);
 }
+
+/** Take the latest swipe back: the song is the current card again, and it plays. */
+function undo() {
+  if (!last || leaving) return;
+  const { card: song, verdict, at } = last;
+  last = null;
+  if (verdict === "yes") sessionYes--;
+  if (verdict === "no") sessionNo--;
+  index = at;
+  if (device && !blocked) void playFrom(at);
+  saving = saving
+    .then(async () => {
+      if (!data) return;
+      const d = await unjudge($state.snapshot(data) as TrainData, song, verdict);
+      data = { ...d, deckPlaylistId: data?.deckPlaylistId ?? d.deckPlaylistId };
+    })
+    .catch(() => {});
+}
+const VERDICT_WORD: Record<Verdict, string> = { yes: "yes", no: "no", later: "skip" };
 
 // --- Dragging the card ------------------------------------------------------
 // The card's position is set through element.style (CSSOM), which the strict
@@ -421,15 +455,15 @@ $effect(() => {
 });
 </script>
 
-<BackButton href="#/" label="Back to mixes" />
+{#if swiping}<BackButton href="#/" label="Leave the deck, back to mixes" />{/if}
 
 <main class="screen train">
   {#if card && !done && !choosing}<div class="counter">{index + 1} / {deck.length}</div>{/if}
-  <h1>Train Géza</h1>
+  <h1>Discover</h1>
 
   {#if choosing}
-    <section class="card picker" aria-label="Where should Train play?">
-      <div class="picker-title">Where should Train play?</div>
+    <section class="card picker" aria-label="Where should the deck play?">
+      <div class="picker-title">Where should the deck play?</div>
       <p class="small muted">Your Spotify devices right now. Géza remembers your choice.</p>
       <ul class="device-list">
         {#each devices as d (d.id)}
@@ -565,6 +599,11 @@ $effect(() => {
         <span aria-hidden="true">♥</span>
       </button>
     </div>
+    {#if last}
+      <button class="undo-chip small" onclick={undo}>
+        <Icon name="undo" size={16} /><span>Undo {VERDICT_WORD[last.verdict]}: {last.card.track.title}</span>
+      </button>
+    {/if}
     {#if noSound}
       <div class="card nosound" role="alert">
         <strong>No sound?</strong>
@@ -599,8 +638,11 @@ $effect(() => {
         <div class="stat"><strong class="red">{sessionNo}</strong>No</div>
         <div class="stat"><strong class="muted">{skipped}</strong>Skipped</div>
       </div>
-      {#if skipped > 0}<p class="small muted">Skipped songs may come back in a later deck.</p>{/if}
+      {#if skipped > 0}<p class="small muted">Skipped songs don't count either way.</p>{/if}
       <div class="two">
+        {#if last}
+          <button class="btn secondary small" onclick={undo}><Icon name="undo" size={16} />Undo last swipe</button>
+        {/if}
         {#if data?.playlistId}
           <a class="btn secondary small" href={spotify.openUri(data.playlistId)}>Play “{YES_PLAYLIST}”</a>
         {/if}
@@ -615,8 +657,17 @@ $effect(() => {
     <div class="card rules">
       <div class="row"><span class="badge keep">→</span><span><strong>Swipe right: keep</strong><br /><span class="small muted">Goes to “{YES_PLAYLIST}” and steers every mix</span></span></div>
       <div class="row"><span class="badge drop">←</span><span><strong>Swipe left: drop</strong><br /><span class="small muted">Goes to “{NO_PLAYLIST}”, never suggested again</span></span></div>
-      <div class="row"><span class="badge later">↑</span><span><strong>Swipe up: skip for now</strong><br /><span class="small muted">Doesn't count either way; may come back</span></span></div>
+      <div class="row"><span class="badge later">↑</span><span><strong>Swipe up: skip for now</strong><br /><span class="small muted">Doesn't count either way</span></span></div>
     </div>
+    <button class="btn start" onclick={start} disabled={!data || !!app.busy}>Start a deck</button>
+    <a class="card row learned" href="#/taste">
+      <span class="badge keep"><Icon name="check" size={18} /></span>
+      <span class="grow">
+        <strong>What Géza learned</strong><br />
+        <span class="small muted">Genres, eras, artists it thinks you like; switch off any it got wrong</span>
+      </span>
+      <Icon name="arrow" size={18} />
+    </a>
     {#if data && (data.yes.length || data.no.length)}
       <p class="small muted tally">So far: {data.yes.length} yes · {data.no.length} no</p>
     {/if}
@@ -640,11 +691,7 @@ $effect(() => {
   {/if}
 </main>
 
-{#if !card && !done && !blocked && !more}
-  <div class="actions">
-    <button class="btn" onclick={start} disabled={!data || !!app.busy}>Start a deck</button>
-  </div>
-{/if}
+{#if !swiping}<TabBar active="discover" />{/if}
 
 <style>
   .train { position: relative; }
@@ -687,6 +734,15 @@ $effect(() => {
   .badge.keep { background: var(--lime); }
   .badge.drop { background: #ffe3d6; color: var(--danger); }
   .badge.later { background: var(--bg); color: var(--muted); }
+  .start { margin-top: 16px; }
+  .learned { margin-top: 12px; min-height: 72px; }
+  .learned .grow { flex: 1; min-width: 0; }
+  .undo-chip {
+    display: flex; align-items: center; gap: 8px; margin: 14px auto 0; max-width: 100%; min-height: 44px;
+    padding: 0 16px; border-radius: 22px; border: 1.5px solid var(--line); background: var(--white);
+    font-weight: 600; cursor: pointer;
+  }
+  .undo-chip span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .tally { text-align: center; margin: 12px 8px 0; }
   .yes-link { display: flex; justify-content: center; margin: 12px auto 0; width: fit-content; }
   .deck { position: relative; margin-top: 12px; }

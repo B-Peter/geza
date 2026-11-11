@@ -5,7 +5,7 @@ import { loadRandom, prepareRandom, RANDOM_SIZE, type RandomSettings, saveRandom
 import * as spotify from "../spotify.js";
 import { openUri } from "../spotify.js";
 import { app } from "../state.svelte.js";
-import { type Card, judge, loadTrain, type TrainData, type Verdict } from "../train.js";
+import { type Card, judge, loadTrain, type TrainData, unjudge, type Verdict } from "../train.js";
 import BackButton from "../ui/BackButton.svelte";
 import Icon from "../ui/Icon.svelte";
 import Radar from "../ui/Radar.svelte";
@@ -17,17 +17,27 @@ let ready = $state<{ found: number; picked: number; songs: Card[] } | null>(null
 let verdicts = $state<Record<string, Verdict>>({});
 let train = $state<TrainData | null>(null);
 
-/** A yes or no here teaches Géza exactly like a swipe in Train. */
-async function rate(card: Card, verdict: Verdict) {
-  if (verdicts[card.track.id]) return;
-  verdicts[card.track.id] = verdict;
-  train ??= await loadTrain();
-  train = await judge(
-    $state.snapshot(train) as TrainData,
-    $state.snapshot(card) as Card,
-    verdict,
-    app.profile,
-  );
+/** One rating is saved after the other, on top of the one before. */
+let saving: Promise<void> = Promise.resolve();
+
+/**
+ * A yes or no here teaches Géza exactly like a swipe in Discover. Tapping
+ * the same button again takes the rating back.
+ */
+function rate(card: Card, verdict: Verdict) {
+  const id = card.track.id;
+  const was = verdicts[id];
+  if (was && was !== verdict) return;
+  const song = $state.snapshot(card) as Card;
+  if (was) delete verdicts[id];
+  else verdicts[id] = verdict;
+  saving = saving
+    .then(async () => {
+      train ??= await loadTrain();
+      const data = $state.snapshot(train) as TrainData;
+      train = was ? await unjudge(data, song, verdict) : await judge(data, song, verdict, app.profile);
+    })
+    .catch(() => {});
 }
 
 $effect(() => {
@@ -103,12 +113,12 @@ async function pick() {
             <div class="title">{song.track.title}</div>
             <div class="small muted">{song.track.artist} · {song.reason}</div>
           </div>
-          <button class="rate no" class:on={v === "no"} disabled={!!v} aria-label={`No: ${song.track.title}`} onclick={() => rate(song, "no")}>✕</button>
-          <button class="rate yes" class:on={v === "yes"} disabled={!!v} aria-label={`Yes: ${song.track.title}`} onclick={() => rate(song, "yes")}>♥</button>
+          <button class="rate no" class:on={v === "no"} disabled={v === "yes"} aria-pressed={v === "no"} aria-label={`No: ${song.track.title}`} onclick={() => rate(song, "no")}>✕</button>
+          <button class="rate yes" class:on={v === "yes"} disabled={v === "no"} aria-pressed={v === "yes"} aria-label={`Yes: ${song.track.title}`} onclick={() => rate(song, "yes")}>♥</button>
         </div>
       {/each}
     </div>
-    <p class="small muted none">A yes or no here counts like a swipe in Train.</p>
+    <p class="small muted none">A yes or no here counts like a swipe in Discover. Tap it again to take it back.</p>
   {/if}
 </main>
 

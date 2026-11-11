@@ -74,18 +74,6 @@ async function logout() {
     <a href="https://www.spotify.com/account/apps/" target="_blank" rel="noopener noreferrer">spotify.com/account/apps</a>.
   </p>
 
-  <div class="label">Your taste</div>
-  <div class="card">
-    <a class="row" href="#/taste">
-      <span class="ico lime"><Icon name="check" size={18} /></span>
-      <div class="grow">
-        <div class="name">What Géza learned</div>
-        <div class="small muted">Genres, eras, artists it thinks you like; switch off any it got wrong</div>
-      </div>
-      <Icon name="arrow" size={18} />
-    </a>
-  </div>
-
   <div class="label">More</div>
   <div class="card">
     <a class="row" href="spike.html">
@@ -112,5 +100,4 @@ async function logout() {
   .blue { background: #b8ccff; }
   .mint { background: #a9ebd0; }
   .yellow { background: #ffe49a; }
-  .lime { background: var(--lime); }
 </style>

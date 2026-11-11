@@ -1,8 +1,9 @@
 <script lang="ts">
 import Icon from "./Icon.svelte";
 
-let { active }: { active: "mixes" | "settings" } = $props();
+let { active }: { active: "discover" | "mixes" | "settings" } = $props();
 const tabs = [
+  { id: "discover", label: "Discover", href: "#/train" },
   { id: "mixes", label: "Mixes", href: "#/" },
   { id: "settings", label: "Settings", href: "#/settings" },
 ] as const;
@@ -35,8 +36,8 @@ const tabs = [
   }
   a {
     height: 48px;
-    min-width: 72px;
-    padding: 0 22px;
+    min-width: 64px;
+    padding: 0 20px;
     border-radius: 24px;
     color: rgba(255, 255, 255, 0.75);
     display: flex;

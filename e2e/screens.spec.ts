@@ -6,7 +6,7 @@ test.afterEach(({ errors }) => {
 
 test("01 welcome", async ({ page }) => {
   await page.goto("./");
-  await expect(page.getByRole("heading", { name: "Your music, tuned every week." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "New music, picked for you." })).toBeVisible();
   await expect(page.getByLabel("Spotify client ID")).toBeVisible();
   await snap(page, "01-welcome");
 });
@@ -61,12 +61,16 @@ test("flow: create playlists, prepare and apply a swap", async ({ page }) => {
   await open(page, "./");
   await page.getByRole("button", { name: "Create playlists" }).click();
   await expect(page.getByRole("heading", { name: "Mixes", exact: true })).toBeVisible();
+  // Fresh playlists are empty: the tiles say so and one button fills them all.
+  await expect(page.getByText("Your mixes are empty")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Fill all 4" })).toBeVisible();
+  await expect(page.getByText("Empty", { exact: true })).toHaveCount(4);
 
   await page.getByRole("link", { name: "Driving settings" }).click();
   await expect(page.getByText("Midnight Tarmac")).toBeVisible();
   await page.getByRole("button", { name: "Prepare swap" }).click();
 
-  await expect(page.getByRole("heading", { name: "Weekly swap" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Swap", exact: true })).toBeVisible();
   await expect(page.getByText("Long Way Round")).toBeVisible();
   await expect(page.getByText("Open Window")).toBeVisible();
   // The mock mix has 6 of 25 songs, so the swap only fills: nothing comes out.
@@ -274,7 +278,7 @@ test("12 what Géza learned: labels can be switched off", async ({ page }) => {
       ],
     });
   });
-  await open(page, "./#/settings");
+  await open(page, "./#/train");
   await page.getByRole("link", { name: /What Géza learned/ }).click();
   await expect(page.getByRole("heading", { name: "What Géza learned" })).toBeVisible();
   await expect(page.getByText("From 5 swipes")).toBeVisible();
@@ -315,7 +319,12 @@ test("flow: rate the random picks, and it counts like a swipe", async ({ page })
   );
   await page.getByRole("button", { name: "Yes: Long Way Round" }).click();
   expect((await added).postDataJSON()).toEqual({ uris: ["spotify:track:t101"] });
-  await expect(page.getByRole("button", { name: "Yes: Long Way Round" })).toBeDisabled();
+  // The rating shows, and the opposite one is off until this one is taken back.
+  await expect(page.getByRole("button", { name: "Yes: Long Way Round" })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByRole("button", { name: "No: Long Way Round" })).toBeDisabled();
   await page.getByRole("button", { name: "No: Open Window" }).click();
   const history = await page.evaluate(async () => {
     const load = (path: string) => import(/* @vite-ignore */ path);

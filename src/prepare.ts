@@ -44,7 +44,7 @@ export async function ensurePlaylists(
     const playlist = await spotify.createPlaylist(
       profile.id,
       mix.playlistName,
-      `${mix.name} mix, refreshed weekly by Géza.`,
+      `${mix.name} mix, kept fresh by Géza.`,
     );
     out = out.map((m) => (m.id === mix.id ? { ...m, playlistId: playlist.id } : m));
     // Start the ledger empty, so songs you add in Spotify later are noticed.
@@ -145,6 +145,18 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
   };
   await savePending(swap);
   return swap;
+}
+
+/**
+ * Fill an empty mix in one go: with nothing in it, nothing can be lost, so
+ * there is no review step. If the mix turns out to have songs that would go
+ * out, nothing is written: the swap waits for a review instead (null).
+ */
+export async function fillMix(mix: Mix, onProgress: Progress = () => {}): Promise<Mix | null> {
+  const swap = await prepareSwap(mix, onProgress);
+  if (swap.remove.length > 0) return null;
+  onProgress("Filling the playlist…");
+  return applyPending(mix, swap);
 }
 
 /** Write the swap to Spotify. Takes a snapshot first so it can be undone. */

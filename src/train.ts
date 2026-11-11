@@ -645,6 +645,29 @@ export async function judge(
   return copyToSpotify(next, "yes", t, profile);
 }
 
+/**
+ * Take a swipe back: off the history, off its list, and out of its Spotify
+ * playlist (a failure there is ignored; the lists on the device count).
+ */
+export async function unjudge(data: TrainData, card: Card, verdict: Verdict): Promise<TrainData> {
+  const key = songKey(card.track.artist, card.track.title);
+  const same = (s: SongRef) => songKey(s.artist, s.title) === key;
+  let at = -1;
+  data.history.forEach((j, i) => {
+    if (j.verdict === verdict && same(j)) at = i;
+  });
+  const next: TrainData = {
+    ...data,
+    history: data.history.filter((_, i) => i !== at),
+    yes: verdict === "yes" ? data.yes.filter((t) => t.id !== card.track.id && !same(t)) : data.yes,
+    no: verdict === "no" ? data.no.filter((s) => !same(s)) : data.no,
+  };
+  await saveTrain(next);
+  const playlistId = verdict === "yes" ? next.playlistId : verdict === "no" ? next.noPlaylistId : null;
+  if (playlistId) await spotify.removeFromPlaylist(playlistId, [card.track.uri]).catch(() => {});
+  return next;
+}
+
 const COPIES = {
   yes: { name: YES_PLAYLIST, description: "Songs you swiped yes on in Géza's Train.", field: "playlistId" },
   no: {

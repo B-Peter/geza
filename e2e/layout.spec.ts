@@ -18,7 +18,7 @@ test.afterEach(({ errors }) => {
 const all = { loggedIn: true, claudeKey: true, playlists: true } satisfies SeedOptions;
 
 const SCREENS: Screen[] = [
-  { name: "welcome", path: "./", ready: (p) => p.getByText("Your music, tuned every week.").waitFor() },
+  { name: "welcome", path: "./", ready: (p) => p.getByText("New music, picked for you.").waitFor() },
   {
     name: "claude-key",
     seed: { loggedIn: true },
@@ -56,7 +56,7 @@ const SCREENS: Screen[] = [
         { id: "phone1", name: "Peter's iPhone", type: "Smartphone", is_active: false },
       ];
       await p.getByRole("button", { name: "Start a deck" }).click();
-      await p.getByRole("region", { name: "Where should Train play?" }).waitFor();
+      await p.getByRole("region", { name: "Where should the deck play?" }).waitFor();
     },
   },
   { name: "train", seed: all, path: "./#/train", ready: (p) => p.getByText("Swipe right: keep").waitFor() },

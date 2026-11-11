@@ -48,8 +48,8 @@ $effect(() => {
 
 const modes: { id: Mode; label: string; hint: () => string }[] = [
   { id: "keep", label: "Keep", hint: () => "Never changes" },
-  { id: "tweak", label: "Tweak", hint: () => `${SWAP_PCT[id].tweak}% each week` },
-  { id: "renew", label: "Renew", hint: () => `${SWAP_PCT[id].renew}% each week` },
+  { id: "tweak", label: "Tweak", hint: () => `${SWAP_PCT[id].tweak}% per swap` },
+  { id: "renew", label: "Renew", hint: () => `${SWAP_PCT[id].renew}% per swap` },
 ];
 
 const lockedIds = $derived(new Set(mix.locked.map((t) => t.id)));
