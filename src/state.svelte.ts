@@ -4,6 +4,7 @@ import * as claude from "./claude.js";
 import { prefetchDeck } from "./deckCache.js";
 import { type LearnSummary, learnFromSpotify } from "./learn.js";
 import { loadMixes, loadPending, type Mix, type MixId, type PendingSwap, saveMixes } from "./mixes.js";
+import { prepareSwap } from "./prepare.js";
 import * as spotify from "./spotify.js";
 import { type Profile, SessionExpiredError } from "./spotify.js";
 import { loadTrain } from "./train.js";
@@ -37,6 +38,16 @@ export function go(path: string): void {
   location.hash = path;
 }
 
+/** A yes-or-no question asked in a sheet (instead of the browser's own dialog). */
+export interface Question {
+  title: string;
+  text?: string;
+  /** The label of the button that goes ahead. */
+  action: string;
+  /** The action deletes or overwrites something. */
+  danger?: boolean;
+}
+
 export interface Toast {
   text: string;
   kind: "error" | "ok";
@@ -53,6 +64,11 @@ class AppState {
   toast = $state<Toast | null>(null);
   /** Progress message while a long task runs; null when idle. */
   busy = $state<string | null>(null);
+  /** Swaps being prepared in the background, by mix: what each is doing right now. */
+  preparing = $state<Partial<Record<MixId, string>>>({});
+  /** The question on screen, if any. */
+  asking = $state<Question | null>(null);
+  #answer: ((ok: boolean) => void) | null = null;
 
   needsPlaylists = $derived(this.mixes.some((m) => !m.playlistId));
 
@@ -185,6 +201,44 @@ class AppState {
       },
       ms ?? (kind === "error" ? 8000 : 3000),
     );
+  }
+
+  /** Ask before something that can't be taken back. Resolves true to go ahead. */
+  confirm(question: Question): Promise<boolean> {
+    this.#answer?.(false);
+    return new Promise((resolve) => {
+      this.asking = question;
+      this.#answer = resolve;
+    });
+  }
+
+  answer(ok: boolean): void {
+    this.asking = null;
+    this.#answer?.(ok);
+    this.#answer = null;
+  }
+
+  /**
+   * Prepare a swap without holding the app up: you can leave the mix, and
+   * its tile says when the swap is ready. If you are still on the mix when
+   * it is done, the review opens.
+   */
+  async prepare(id: MixId): Promise<void> {
+    if (this.preparing[id]) return;
+    this.preparing[id] = "Checking what you've listened to…";
+    try {
+      await this.learn();
+      const swap = await prepareSwap($state.snapshot(this.mix(id)) as Mix, (m) => {
+        this.preparing[id] = m;
+      });
+      this.pending[id] = swap;
+      if (this.route.name === "mix" && this.route.id === id) go(`/review/${id}`);
+      else this.notify(`${this.mix(id).name}: swap ready to review.`, "ok");
+    } catch (e) {
+      this.notify(e);
+    } finally {
+      delete this.preparing[id];
+    }
   }
 
   /** Run a long task with a progress message; errors become a toast. */

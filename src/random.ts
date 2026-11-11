@@ -1,12 +1,13 @@
 // "Play something random": a one-off playlist picked from its own spider
 // graph, separate from the four weekly mixes.
 
-import { curate, type Tune } from "./claude.js";
+import { type CurateInput, curate, type Tune } from "./claude.js";
 import { PRESETS } from "./radar.js";
 import type { Profile, Track } from "./spotify.js";
 import * as spotify from "./spotify.js";
 import * as store from "./store.js";
 import { filterAdditions } from "./swap.js";
+import { songKey } from "./text.js";
 import { type Card, loadTrain, trainSignals } from "./train.js";
 
 export const RANDOM_PLAYLIST = "Studio Random";
@@ -66,27 +67,53 @@ export async function prepareRandom(
 
   const trained = trainSignals(await loadTrain());
   onProgress("Claude is picking songs…");
-  const picks = await curate(
-    {
-      mix: "Random, for right now",
-      mode: "renew",
-      remove_count: 0,
-      add_count: RANDOM_SIZE,
-      tune: settings.tune,
-      loved: [...trained.loved, ...topTracks.map(ref)].slice(0, 40),
-      blocked: trained.blocked,
-      taste: trained.taste,
-      locked: [],
-      current: [],
-      top_artists: topArtists,
-      note: settings.note,
-    },
-    "low",
-  );
+  const input: CurateInput = {
+    mix: "Random, for right now",
+    mode: "renew",
+    remove_count: 0,
+    add_count: RANDOM_SIZE,
+    tune: settings.tune,
+    loved: [...trained.loved, ...topTracks.map(ref)].slice(0, 40),
+    blocked: trained.blocked,
+    taste: trained.taste,
+    locked: [],
+    current: [],
+    top_artists: topArtists,
+    note: settings.note,
+  };
+  const picks = await curate(input, "low");
 
   onProgress("Finding the songs on Spotify…");
-  const resolved = await spotify.findAll(picks.add);
-  const { add } = filterAdditions(resolved, [], [], trained.blocked, RANDOM_SIZE);
+  let resolved = await spotify.findAll(picks.add);
+  let { add, missing } = filterAdditions(resolved, [], [], trained.blocked, RANDOM_SIZE);
+  const named = new Set(picks.add.map((p) => songKey(p.artist, p.title)));
+
+  // One replacement round for picks that weren't found or were unusable.
+  const short = RANDOM_SIZE - add.length;
+  if (short > 0 && add.length > 0) {
+    onProgress(`Asking Claude for ${short} replacement${short === 1 ? "" : "s"}…`);
+    const retry = await curate(
+      {
+        ...input,
+        add_count: short,
+        current: add.map((a) => ref(a.track)),
+        blocked: [...input.blocked, ...missing.map(ref)],
+      },
+      "low",
+    ).catch(() => ({ add: [], remove: [] }));
+    for (const p of retry.add) named.add(songKey(p.artist, p.title));
+    const more = await spotify.findAll(retry.add);
+    const extra = filterAdditions(
+      more,
+      add.map((a) => a.track),
+      [],
+      trained.blocked,
+      short,
+    );
+    resolved = [...resolved, ...more];
+    add = [...add, ...extra.add];
+    missing = [...missing, ...extra.missing];
+  }
   if (add.length === 0) throw new Error("None of Claude's picks were found on Spotify. Try again.");
   const uris = add.map((a) => (a.track as Track).uri);
   const tagsOf = new Map(resolved.map((r) => [r.track?.id ?? "", (r.pick.tags ?? []).slice(0, 4)]));
@@ -109,5 +136,6 @@ export async function prepareRandom(
 
   const next = { ...settings, playlistId };
   await saveRandom(next);
-  return { settings: next, picked: picks.add.length, found: add.length, songs };
+  // "picked" counts the different songs Claude named over both rounds.
+  return { settings: next, picked: Math.max(named.size, add.length), found: add.length, songs };
 }

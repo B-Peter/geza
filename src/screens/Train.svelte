@@ -426,11 +426,32 @@ function down(e: PointerEvent) {
   (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 }
 
+/** Which verdict a drag is heading for, and how far along it is (1 = far enough). */
+function leaning(dx: number, dy: number): { verdict: Verdict | null; pull: number } {
+  const up = Math.max(0, -dy);
+  if (Math.abs(dx) >= up)
+    return { verdict: dx > 0 ? "yes" : dx < 0 ? "no" : null, pull: Math.abs(dx) / THRESHOLD };
+  return { verdict: "later", pull: up / THRESHOLD };
+}
+
+let stampYes = $state<HTMLElement | null>(null);
+let stampNo = $state<HTMLElement | null>(null);
+let stampLater = $state<HTMLElement | null>(null);
+/** Fade in the word for the verdict the drag is heading for (through CSSOM: the CSP allows that). */
+function showStamp(verdict: Verdict | null, pull: number) {
+  const stamps = { yes: stampYes, no: stampNo, later: stampLater };
+  for (const [v, el] of Object.entries(stamps)) {
+    if (el) el.style.opacity = v === verdict ? String(Math.min(1, pull)) : "0";
+  }
+}
+
 function move(e: PointerEvent) {
   if (!start0 || !cardEl) return;
   const dx = e.clientX - start0.x;
   const dy = Math.min(0, e.clientY - start0.y);
   cardEl.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx / 18}deg)`;
+  const { verdict, pull } = leaning(dx, dy);
+  showStamp(verdict, pull);
 }
 
 function up(e: PointerEvent) {
@@ -438,9 +459,9 @@ function up(e: PointerEvent) {
   const dx = e.clientX - start0.x;
   const dy = e.clientY - start0.y;
   start0 = null;
-  if (dx > THRESHOLD) decide("yes");
-  else if (dx < -THRESHOLD) decide("no");
-  else if (dy < -THRESHOLD) decide("later");
+  const { verdict, pull } = leaning(dx, dy);
+  showStamp(null, 0);
+  if (verdict && pull >= 1) decide(verdict);
   else if (cardEl) cardEl.style.transform = "";
 }
 
@@ -457,9 +478,9 @@ $effect(() => {
 
 {#if swiping}<BackButton href="#/" label="Leave the deck, back to mixes" />{/if}
 
-<main class="screen train">
+<main class="screen train" class:swiping>
   {#if card && !done && !choosing}<div class="counter">{index + 1} / {deck.length}</div>{/if}
-  <h1>Discover</h1>
+  {#if !swiping}<h1>Discover</h1>{/if}
 
   {#if choosing}
     <section class="card picker" aria-label="Where should the deck play?">
@@ -534,6 +555,9 @@ $effect(() => {
         onpointercancel={up}
       >
         <div class="art">
+          <span class="stamp yes" bind:this={stampYes} aria-hidden="true">Yes</span>
+          <span class="stamp no" bind:this={stampNo} aria-hidden="true">No</span>
+          <span class="stamp later" bind:this={stampLater} aria-hidden="true">Skip</span>
           {#if card.track.image}
             <img src={card.track.image} alt="" draggable="false" />
           {:else}
@@ -677,16 +701,22 @@ $effect(() => {
       </a>
     {/if}
     {#if lastDeck}
-      <p class="small muted tally" data-testid="last-deck">
-        Last deck: {lastDeck.found} of {lastDeck.asked} artists on Spotify · {lastDeck.size} songs · {lastDeck.yes} yes,
-        {lastDeck.no} no
-        {#if lastDeck.ms}
-          · first cards in {(lastDeck.ms.total / 1000).toFixed(1)} s (Claude {(lastDeck.ms.claude / 1000).toFixed(1)} s,
-          Spotify {((lastDeck.ms.listening + lastDeck.ms.spotify) / 1000).toFixed(1)} s{lastDeck.ms.waited
-            ? `, of which ${(lastDeck.ms.waited / 1000).toFixed(0)} s waiting for Spotify's rate limit`
-            : ""})
-        {/if}
+      <p class="small muted tally">
+        Last deck: you kept {lastDeck.yes} of {lastDeck.size} song{lastDeck.size === 1 ? "" : "s"}
       </p>
+      <details class="small muted timing">
+        <summary>How it was built</summary>
+        <span data-testid="last-deck">
+          Last deck: {lastDeck.found} of {lastDeck.asked} artists on Spotify · {lastDeck.size} songs · {lastDeck.yes} yes,
+          {lastDeck.no} no
+          {#if lastDeck.ms}
+            · first cards in {(lastDeck.ms.total / 1000).toFixed(1)} s (Claude {(lastDeck.ms.claude / 1000).toFixed(1)} s,
+            Spotify {((lastDeck.ms.listening + lastDeck.ms.spotify) / 1000).toFixed(1)} s{lastDeck.ms.waited
+              ? `, of which ${(lastDeck.ms.waited / 1000).toFixed(0)} s waiting for Spotify's rate limit`
+              : ""})
+          {/if}
+        </span>
+      </details>
     {/if}
   {/if}
 </main>
@@ -746,6 +776,11 @@ $effect(() => {
   .tally { text-align: center; margin: 12px 8px 0; }
   .yes-link { display: flex; justify-content: center; margin: 12px auto 0; width: fit-content; }
   .deck { position: relative; margin-top: 12px; }
+  /* No tab bar while a deck is on screen: no room kept for it. */
+  .swiping { padding-bottom: calc(24px + var(--safe-bottom)); }
+  .swiping .deck { margin-top: 0; }
+  .timing { text-align: center; margin: 2px 8px 0; }
+  .timing summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; }
   .behind {
     position: absolute; left: 14px; right: 14px; top: 14px; bottom: -10px;
     border-radius: 28px; background: var(--white); opacity: 0.7; box-shadow: 0 1px 0 var(--line);
@@ -759,7 +794,16 @@ $effect(() => {
   .fly-yes { transform: translateX(130%) rotate(18deg) !important; opacity: 0; }
   .fly-no { transform: translateX(-130%) rotate(-18deg) !important; opacity: 0; }
   .fly-later { transform: translateY(-120%) !important; opacity: 0; }
-  .art { position: relative; aspect-ratio: 7 / 5; background: var(--line); }
+  /* Short enough that the card, its three buttons and the undo fit one screen. */
+  .art { position: relative; height: clamp(120px, 26dvh, 250px); background: var(--line); }
+  .stamp {
+    position: absolute; z-index: 1; top: 14px; padding: 6px 14px; border-radius: 14px; opacity: 0;
+    font: 800 22px/26px var(--display); text-transform: uppercase; pointer-events: none;
+    border: 2px solid var(--ink); background: var(--white);
+  }
+  .stamp.yes { left: 14px; background: var(--lime); transform: rotate(-8deg); }
+  .stamp.no { right: 14px; background: #ffe3d6; color: var(--danger); border-color: var(--danger); transform: rotate(8deg); }
+  .stamp.later { left: 50%; transform: translateX(-50%); }
   .art img { display: block; width: 100%; height: 100%; object-fit: cover; }
   .hint { margin: 0 0 4px; font-weight: 600; }
   .placeholder { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }

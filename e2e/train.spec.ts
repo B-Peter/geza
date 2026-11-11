@@ -338,3 +338,37 @@ test("train: the last swipe can be taken back", async ({ page }) => {
     )
     .toEqual({ history: 0, no: 0 });
 });
+
+test("settings: reset forgets every swipe, after asking in a sheet", async ({ page }) => {
+  await seed(page, ready);
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  await expect(page.getByRole("article", { name: "Long Way Round by Fifth Gear" })).toBeVisible();
+  await page.getByRole("button", { name: "Yes, I like it" }).click();
+  await expect(page.getByRole("article", { name: /Open Window/ })).toBeVisible();
+
+  await open(page, "./#/settings");
+  await page.getByRole("button", { name: "Reset", exact: true }).click();
+  const sheet = page.getByRole("alertdialog", { name: "Reset what Géza learned?" });
+  await expect(sheet).toBeVisible();
+  // Cancel leaves everything as it was.
+  await sheet.getByRole("button", { name: "Cancel" }).click();
+  await expect(sheet).toHaveCount(0);
+  const swipes = () =>
+    page.evaluate(async () => {
+      const load = (path: string) => import(/* @vite-ignore */ path);
+      const store = await load("/src/store.ts");
+      const train = await store.get("train");
+      return { history: train.history.length, yes: train.yes.length };
+    });
+  expect(await swipes()).toEqual({ history: 1, yes: 1 });
+
+  await page.getByRole("button", { name: "Reset", exact: true }).click();
+  await sheet.getByRole("button", { name: "Reset" }).click();
+  await expect(page.getByText(/Forgotten\./)).toBeVisible();
+  expect(await swipes()).toEqual({ history: 0, yes: 0 });
+  // The Spotify playlists are not read back in as swipes afterwards.
+  await open(page, "./#/train");
+  await expect(page.getByRole("button", { name: "Start a deck" })).toBeVisible();
+  expect(await swipes()).toEqual({ history: 0, yes: 0 });
+});

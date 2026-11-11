@@ -91,16 +91,16 @@ async function discard() {
       <div class="card">
         {#each swap.add as r (r.track.id)}
           <div class="row">
-            <div class="song">
+            <a class="song" href={r.track.uri} aria-label={`Listen to ${r.track.title} in Spotify`}>
               <div class="title">{r.track.title}</div>
               <div class="small muted">{r.track.artist}</div>
               {#if r.reason}<div class="small why"><Icon name="sparkle" size={12} />{r.reason}</div>{/if}
-            </div>
+            </a>
             <button class="veto" aria-label={`Skip ${r.track.title}`} onclick={() => vetoNew(r)}>Skip</button>
           </div>
         {/each}
       </div>
-      <p class="small muted hint">Skip drops a song from this swap and never suggests it for this mix again.</p>
+      <p class="small muted hint">Tap a song to hear it in Spotify first. Skip drops it from this swap and never suggests it for this mix again.</p>
     {/if}
 
     {#if swap.missing.length}
@@ -121,7 +121,7 @@ async function discard() {
 <style>
   .found { margin-top: 12px; }
   .row { align-items: flex-start; padding: 12px 12px 12px 16px; }
-  .song { flex: 1; min-width: 0; }
+  .song { flex: 1; min-width: 0; min-height: 44px; display: block; }
   /* Whole titles: this is the screen where you decide by them. */
   .title { font-size: 15px; line-height: 20px; font-weight: 600; overflow-wrap: anywhere; }
   .title.out { text-decoration: line-through; text-decoration-color: var(--muted); }

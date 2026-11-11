@@ -1,10 +1,10 @@
 <script lang="ts">
 import { badge, loadLedger, type MixLedger } from "../ledger.js";
 import { loadSnapshots, type MixId, type Mode, SWAP_PCT } from "../mixes.js";
-import { prepareSwap, undoLastSwap } from "../prepare.js";
+import { undoLastSwap } from "../prepare.js";
 import type { Track } from "../spotify.js";
 import * as spotify from "../spotify.js";
-import { app, go } from "../state.svelte.js";
+import { app } from "../state.svelte.js";
 import BackButton from "../ui/BackButton.svelte";
 import Cover from "../ui/Cover.svelte";
 import Icon from "../ui/Icon.svelte";
@@ -61,22 +61,16 @@ async function toggleLock(track: Track) {
   await app.updateMix(id, { locked });
 }
 
-async function prepare() {
-  const swap = await app.task("Starting…", async (progress) => {
-    progress("Checking what you've listened to…");
-    await app.learn();
-    return prepareSwap($state.snapshot(app.mix(id)) as typeof mix, progress);
-  });
-  if (swap) {
-    app.pending[id] = swap;
-    go(`/review/${id}`);
-  }
-}
+/** What the swap being prepared for this mix is doing; undefined when none is. */
+const preparing = $derived(app.preparing[id]);
 
 async function undo() {
-  const ok = confirm(
-    "Restore the playlist to how it was before the last swap? Changes made in Spotify since then will be lost.",
-  );
+  const ok = await app.confirm({
+    title: "Undo the last swap?",
+    text: "The playlist goes back to how it was before it. Changes you made in Spotify since then will be lost.",
+    action: "Undo swap",
+    danger: true,
+  });
   if (!ok) return;
   const updated = await app.task("Restoring the previous version…", () =>
     undoLastSwap($state.snapshot(mix) as typeof mix),
@@ -98,38 +92,6 @@ async function undo() {
   </div>
 
   <div class="body">
-    <div class="label">How it behaves</div>
-    <div class="modes" role="radiogroup" aria-label="Mix mode">
-      {#each modes as m (m.id)}
-        <button
-          class="mode"
-          class:on={mix.mode === m.id}
-          role="radio"
-          aria-checked={mix.mode === m.id}
-          onclick={() => app.updateMix(id, { mode: m.id })}
-        >
-          <strong>{m.label}</strong>
-          <span class="small muted">{m.hint()}</span>
-        </button>
-      {/each}
-    </div>
-
-    <div class="label">Sound</div>
-    <Radar tune={mix.tune} onchange={(tune) => app.updateMix(id, { tune })} label={`Sound of ${mix.name}`} />
-    <p class="small muted hint">Claude aims for this sound in the next swap.</p>
-
-    <div class="card notebox">
-      <label for="note"><Icon name="sparkle" size={18} />Note for Claude</label>
-      <input
-        id="note"
-        class="field"
-        placeholder="More 90s rock, fewer ballads"
-        bind:value={note}
-        onchange={() => app.updateMix(id, { note: note.trim() })}
-      />
-      <p class="small muted">Claude reads this the next time it picks.</p>
-    </div>
-
     <div class="label">In this mix {tracks ? `· ${tracks.length}` : ""}</div>
     <div class="card">
       {#if tracks === null}
@@ -164,6 +126,38 @@ async function undo() {
     {#if canUndo}
       <button class="btn secondary undo" onclick={undo} disabled={!!app.busy}><Icon name="undo" size={18} />Undo last swap</button>
     {/if}
+
+    <div class="label">How it behaves</div>
+    <div class="modes" role="radiogroup" aria-label="Mix mode">
+      {#each modes as m (m.id)}
+        <button
+          class="mode"
+          class:on={mix.mode === m.id}
+          role="radio"
+          aria-checked={mix.mode === m.id}
+          onclick={() => app.updateMix(id, { mode: m.id })}
+        >
+          <strong>{m.label}</strong>
+          <span class="small muted">{m.hint()}</span>
+        </button>
+      {/each}
+    </div>
+
+    <div class="label">Sound</div>
+    <Radar tune={mix.tune} onchange={(tune) => app.updateMix(id, { tune })} label={`Sound of ${mix.name}`} />
+    <p class="small muted hint">Claude aims for this sound in the next swap.</p>
+
+    <div class="card notebox">
+      <label for="note"><Icon name="sparkle" size={18} />Note for Claude</label>
+      <input
+        id="note"
+        class="field"
+        placeholder="More 90s rock, fewer ballads"
+        bind:value={note}
+        onchange={() => app.updateMix(id, { note: note.trim() })}
+      />
+      <p class="small muted">Claude reads this the next time it picks.</p>
+    </div>
   </div>
 </main>
 
@@ -171,8 +165,17 @@ async function undo() {
   {#if app.pending[id]}
     <a class="btn" href={`#/review/${id}`}>Review swap</a>
   {:else}
-    <button class="btn" onclick={prepare} disabled={!!app.busy || mix.mode === "keep" && (tracks?.length ?? 0) >= 25}>
-      {app.busy ?? (tracks?.length ? "Prepare swap" : "Fill this mix")}
+    {#if preparing}
+      <p class="small muted center" role="status">You can leave this screen: the swap keeps going.</p>
+    {:else if mix.mode === "keep" && (tracks?.length ?? 0) >= 25}
+      <p class="small muted center">Set to Keep, so nothing changes. Choose Tweak or Renew to swap songs.</p>
+    {/if}
+    <button
+      class="btn"
+      onclick={() => app.prepare(id)}
+      disabled={!!preparing || !!app.busy || (mix.mode === "keep" && (tracks?.length ?? 0) >= 25)}
+    >
+      {preparing ?? app.busy ?? (tracks?.length ? "Prepare swap" : "Fill this mix")}
     </button>
   {/if}
 </div>
@@ -203,4 +206,5 @@ async function undo() {
   }
   .lock.on { background: var(--lime); color: var(--ink); }
   .undo { margin-top: 14px; }
+  .center { text-align: center; margin: 0 0 10px; }
 </style>

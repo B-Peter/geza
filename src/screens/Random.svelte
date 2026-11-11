@@ -11,7 +11,7 @@ import Icon from "../ui/Icon.svelte";
 import Radar from "../ui/Radar.svelte";
 
 let settings = $state<RandomSettings | null>(null);
-/** Set after a successful pick; cleared when the graph or note changes. */
+/** The last picks; they stay on screen until the next pick. */
 let ready = $state<{ found: number; picked: number; songs: Card[] } | null>(null);
 /** Your verdict per track id, for the list below the picks. */
 let verdicts = $state<Record<string, Verdict>>({});
@@ -47,7 +47,6 @@ $effect(() => {
 async function update(patch: Partial<RandomSettings>) {
   if (!settings) return;
   settings = { ...settings, ...patch };
-  ready = null;
   await saveRandom($state.snapshot(settings) as RandomSettings);
 }
 

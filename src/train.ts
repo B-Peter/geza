@@ -84,6 +84,8 @@ export interface TrainData {
   decks?: DeckStat[];
   /** Taste inferences you switched off ("tag:ballad", "era:2020s", ...). */
   muted?: string[];
+  /** When you reset what Géza learned: the Spotify playlists are not read back after that. */
+  reset?: number;
 }
 
 const KEY = "train";
@@ -714,7 +716,7 @@ async function copyToSpotify(
 export async function restoreFromSpotify(
   data: TrainData,
 ): Promise<{ data: TrainData; yes: number; no: number } | null> {
-  if (data.history.length || data.yes.length || data.no.length) return null;
+  if (data.reset || data.history.length || data.yes.length || data.no.length) return null;
   const playlists = await spotify.listMyPlaylists();
   const yesList = playlists.find((p) => p.name === YES_PLAYLIST);
   const noList = playlists.find((p) => p.name === NO_PLAYLIST);
@@ -739,6 +741,27 @@ export async function restoreFromSpotify(
   };
   await saveTrain(next);
   return { data: next, yes: yes.length, no: no.length };
+}
+
+/**
+ * Forget every swipe and everything learned from them. The playlists in
+ * Spotify stay as they are (new swipes are added to the same ones), and they
+ * are not read back in as swipes.
+ */
+export async function resetTrain(data: TrainData): Promise<TrainData> {
+  const next: TrainData = {
+    yes: [],
+    no: [],
+    history: [],
+    decks: [],
+    muted: [],
+    playlistId: data.playlistId,
+    noPlaylistId: data.noPlaylistId,
+    deckPlaylistId: data.deckPlaylistId,
+    reset: Date.now(),
+  };
+  await saveTrain(next);
+  return next;
 }
 
 /** Switch a taste inference off or on again. */

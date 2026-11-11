@@ -3,7 +3,7 @@ import * as claude from "../claude.js";
 import { forgetDecks } from "../deckCache.js";
 import * as spotify from "../spotify.js";
 import { app, go } from "../state.svelte.js";
-import { forgetListening } from "../train.js";
+import { forgetListening, loadTrain, resetTrain } from "../train.js";
 import Icon from "../ui/Icon.svelte";
 import TabBar from "../ui/TabBar.svelte";
 
@@ -14,19 +14,43 @@ $effect(() => {
 });
 
 async function removeKey() {
-  if (!confirm("Remove your Claude key from this device?")) return;
+  const ok = await app.confirm({
+    title: "Remove your Claude key?",
+    text: "It is deleted from this device. Géza can't pick songs until you add a key again.",
+    action: "Remove key",
+    danger: true,
+  });
+  if (!ok) return;
   await claude.removeKey();
   app.hasKey = false;
   go("/key");
 }
 
 async function logout() {
-  if (!confirm("Log out of Spotify on this device? Your playlists stay in Spotify.")) return;
+  const ok = await app.confirm({
+    title: "Log out of Spotify?",
+    text: "Only on this device. Your playlists stay in Spotify.",
+    action: "Log out",
+  });
+  if (!ok) return;
   await spotify.logout();
   // The next account has its own listening; nothing prepared for this one is kept.
   await Promise.all([forgetListening(), forgetDecks()]).catch(() => {});
   app.loggedIn = false;
   app.profile = null;
+}
+
+async function resetLearned() {
+  const ok = await app.confirm({
+    title: "Reset what Géza learned?",
+    text: "Every swipe and everything learned from them is forgotten on this device. Your mixes and the “Géza · Yes” and “Géza · No” playlists in Spotify stay as they are.",
+    action: "Reset",
+    danger: true,
+  });
+  if (!ok) return;
+  await resetTrain(await loadTrain());
+  await forgetDecks().catch(() => {});
+  app.notify("Forgotten. Géza starts from your Spotify listening again.", "ok");
 }
 </script>
 
@@ -73,6 +97,18 @@ async function logout() {
     Logging out deletes the login from this device. To take away the app's access completely, remove Géza at
     <a href="https://www.spotify.com/account/apps/" target="_blank" rel="noopener noreferrer">spotify.com/account/apps</a>.
   </p>
+
+  <div class="label">Your taste</div>
+  <div class="card">
+    <div class="row">
+      <span class="ico peach"><Icon name="undo" size={18} /></span>
+      <div class="grow">
+        <div class="name">What Géza learned</div>
+        <div class="small muted">Forget every swipe and start over</div>
+      </div>
+      <button class="btn danger small" onclick={resetLearned}>Reset</button>
+    </div>
+  </div>
 
   <div class="label">More</div>
   <div class="card">

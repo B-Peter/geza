@@ -43,6 +43,7 @@ const daysSince = (mix: Mix) => (mix.lastAppliedAt ? Math.floor((now - mix.lastA
 const due = (mix: Mix) => mix.mode !== "keep" && sizes[mix.id] !== 0 && (daysSince(mix) ?? 0) >= DUE_DAYS;
 
 function status(mix: Mix): string {
+  if (app.preparing[mix.id]) return "Preparing a swap…";
   if (app.pending[mix.id]) return "Swap ready";
   if (sizes[mix.id] === 0) return "Empty";
   if (mix.mode === "keep") return "Kept as is";
