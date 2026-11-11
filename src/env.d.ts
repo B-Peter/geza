@@ -8,5 +8,7 @@ interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
 
-/** Short commit and build time, injected by vite.config.ts. */
+/** The version number (e.g. "0.1.37"), injected by vite.config.ts. */
 declare const __APP_VERSION__: string;
+/** Short commit and build time, injected by vite.config.ts. */
+declare const __APP_BUILD__: string;

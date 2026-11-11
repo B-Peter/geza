@@ -96,7 +96,7 @@ async function logout() {
       </div>
     </a>
   </div>
-  <p class="small muted version">Version {__APP_VERSION__}</p>
+  <p class="small muted version"><strong>Version {__APP_VERSION__}</strong><br />{__APP_BUILD__}</p>
 </main>
 
 <TabBar active="settings" />

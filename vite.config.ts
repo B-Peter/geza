@@ -1,4 +1,5 @@
 import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import type { Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
@@ -34,24 +35,41 @@ const csp = (): Plugin => ({
   ],
 });
 
-// Shown in the app, so it's easy to tell which build a phone is running.
+const git = (args: string): string | null => {
+  try {
+    return execSync(`git ${args}`, { encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The version people see: major.minor from package.json (raised by hand for
+ * a milestone) and the number of commits as the last part, so every deploy
+ * gets the next number on its own and a version points at one commit.
+ */
 function appVersion(): string {
-  const sha =
-    process.env.GITHUB_SHA ??
-    (() => {
-      try {
-        return execSync("git rev-parse HEAD", { encoding: "utf8" }).trim();
-      } catch {
-        return "dev";
-      }
-    })();
+  const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as {
+    version: string;
+  };
+  const [major = "0", minor = "0"] = pkg.version.split(".");
+  const commits = Number(git("rev-list --count HEAD"));
+  return `${major}.${minor}.${Number.isFinite(commits) && commits > 0 ? commits : 0}`;
+}
+
+/** Commit and build time, for telling two builds of one version apart. */
+function appBuild(): string {
+  const sha = process.env.GITHUB_SHA ?? git("rev-parse HEAD") ?? "dev";
   return `${sha.slice(0, 7)} · ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 export default defineConfig({
   // Relative base so the app works at https://<user>.github.io/<repo>/.
   base: "./",
-  define: { __APP_VERSION__: JSON.stringify(appVersion()) },
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion()),
+    __APP_BUILD__: JSON.stringify(appBuild()),
+  },
   plugins: [
     svelte(),
     csp(),

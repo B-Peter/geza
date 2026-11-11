@@ -1,4 +1,4 @@
-// "Géza was updated": a short note, shown once after a new version is installed.
+// "Updated to version …": a short note, shown once after a new version is installed.
 
 const SEEN_KEY = "ps.seenVersion";
 
@@ -15,5 +15,5 @@ export function updateMessage(version: string): string | null {
     return null;
   }
   if (!seen || seen === version) return null;
-  return "Géza was updated.";
+  return `Updated to version ${version}`;
 }

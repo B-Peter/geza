@@ -335,8 +335,8 @@ test("an installed update says so once", async ({ page }) => {
   await seed(page, { loggedIn: true, claudeKey: true, playlists: true });
   await page.evaluate(() => localStorage.setItem("ps.seenVersion", "old-version"));
   await open(page, "./#/");
-  await expect(page.getByText("Géza was updated.")).toBeVisible();
+  await expect(page.getByText(/Updated to version \d+\.\d+\.\d+$/)).toBeVisible();
   await open(page, "./#/");
   await expect(page.getByRole("heading", { name: "Mixes", exact: true })).toBeVisible();
-  await expect(page.getByText(/Géza was updated/)).toHaveCount(0);
+  await expect(page.getByText(/Updated to version/)).toHaveCount(0);
 });
