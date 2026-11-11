@@ -349,3 +349,52 @@ test("an installed update says so once", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Mixes", exact: true })).toBeVisible();
   await expect(page.getByText(/Updated to version/)).toHaveCount(0);
 });
+
+test("mix: changing the mode keeps the page where it is", async ({ page }) => {
+  await seed(page, { loggedIn: true, claudeKey: true, playlists: true });
+  await open(page, "./#/mix/driving");
+  await expect(page.getByText("Midnight Tarmac")).toBeVisible();
+  // Scrolled down to the mode buttons, as on the phone.
+  await page.getByRole("radio", { name: /Renew/ }).scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollBy(0, 120));
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(200);
+  await page.getByRole("radio", { name: /Renew/ }).click();
+  await expect(page.getByRole("radio", { name: /Renew/ })).toHaveAttribute("aria-checked", "true");
+  await page.waitForTimeout(300);
+  // The song list stays (no "Loading…"), so the page doesn't collapse and jump up.
+  await expect(page.getByText("Loading…")).toHaveCount(0);
+  expect(Math.abs((await page.evaluate(() => window.scrollY)) - before)).toBeLessThan(4);
+});
+
+test("mixes: empty mixes are filled in the background", async ({ page }) => {
+  await seed(page, { loggedIn: true, claudeKey: true, playlists: true });
+  await page.evaluate(async () => {
+    const load = (path: string) => import(/* @vite-ignore */ path);
+    const ledger = await load("/src/ledger.ts");
+    for (const id of ["driving", "working", "cooking", "home"]) await ledger.setKnown(id, []);
+  });
+  // The four playlists are empty in Spotify.
+  await page.route(/\/v1\/playlists\/[^/]+\/items/, (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({
+          contentType: "application/json",
+          headers: { "access-control-allow-origin": "*" },
+          body: JSON.stringify({ items: [], next: null }),
+        })
+      : route.fallback(),
+  );
+  await open(page, "./#/");
+  await page.getByRole("button", { name: "Fill all 4" }).click();
+  // No blocking overlay: the screen says what is happening and stays usable.
+  await expect(page.getByText("Filling 4 mixes…")).toBeVisible();
+  await expect(page.locator(".overlay")).toHaveCount(0);
+  await page.getByRole("link", { name: "Discover", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Discover" })).toBeVisible();
+  await page.getByRole("link", { name: "Mixes", exact: true }).click();
+  await expect(page.getByText("4 mixes filled in Spotify.")).toBeVisible({ timeout: 20_000 });
+  // Working is set to Keep; the other three were just swapped.
+  await expect(page.getByText("Swapped today")).toHaveCount(3);
+  await expect(page.getByText("Kept as is")).toHaveCount(1);
+  await expect(page.getByText("Empty", { exact: true })).toHaveCount(0);
+});

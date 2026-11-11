@@ -4,7 +4,7 @@ import * as claude from "./claude.js";
 import { prefetchDeck } from "./deckCache.js";
 import { type LearnSummary, learnFromSpotify } from "./learn.js";
 import { loadMixes, loadPending, type Mix, type MixId, type PendingSwap, saveMixes } from "./mixes.js";
-import { prepareSwap } from "./prepare.js";
+import { fillMix, prepareSwap } from "./prepare.js";
 import * as spotify from "./spotify.js";
 import { type Profile, SessionExpiredError } from "./spotify.js";
 import { loadTrain } from "./train.js";
@@ -66,6 +66,8 @@ class AppState {
   busy = $state<string | null>(null);
   /** Swaps being prepared in the background, by mix: what each is doing right now. */
   preparing = $state<Partial<Record<MixId, string>>>({});
+  /** Bumped whenever a mix's songs changed in Spotify (for screens showing its size). */
+  mixesChanged = $state(0);
   /** The question on screen, if any. */
   asking = $state<Question | null>(null);
   #answer: ((ok: boolean) => void) | null = null;
@@ -238,6 +240,56 @@ class AppState {
       this.notify(e);
     } finally {
       delete this.preparing[id];
+    }
+  }
+
+  /**
+   * Fill empty mixes in the background, two at a time: the app stays usable
+   * and each tile shows how its mix is coming along.
+   */
+  fillEmpty(ids: MixId[]): void {
+    const todo = ids.filter((id) => !this.preparing[id]);
+    if (todo.length === 0) return;
+    for (const id of todo) this.preparing[id] = "Waiting its turn…";
+    let next = 0;
+    let filled = 0;
+    const worker = async () => {
+      while (next < todo.length) {
+        const id = todo[next++];
+        if (id && (await this.#fillOne(id))) filled++;
+      }
+    };
+    void Promise.all([worker(), worker()]).then(() => {
+      if (filled > 0)
+        this.notify(filled === 1 ? "Mix filled in Spotify." : `${filled} mixes filled in Spotify.`, "ok");
+    });
+  }
+
+  async #fillOne(id: MixId): Promise<boolean> {
+    try {
+      this.preparing[id] = "Starting…";
+      const updated = await fillMix($state.snapshot(this.mix(id)) as Mix, (m) => {
+        this.preparing[id] = m;
+      });
+      if (!updated) {
+        // It had songs after all: the swap waits for a review instead.
+        const swap = await loadPending(id);
+        if (swap) this.pending[id] = swap;
+        return false;
+      }
+      delete this.pending[id];
+      await this.updateMix(id, {
+        lastAppliedAt: updated.lastAppliedAt,
+        blocked: updated.blocked,
+        reasons: updated.reasons,
+      });
+      return true;
+    } catch (e) {
+      this.notify(e);
+      return false;
+    } finally {
+      delete this.preparing[id];
+      this.mixesChanged++;
     }
   }
 

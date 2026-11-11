@@ -27,6 +27,8 @@ export interface Card {
   tags: string[];
   /** The deck this card came from (its "at"), for per-deck stats. */
   deck?: number;
+  /** Genre family (see genreFamily): no deck is allowed to be mostly one. */
+  genre?: string;
 }
 
 /** How a deck went: what Claude asked for, what Spotify had, what you saw. */
@@ -153,6 +155,64 @@ export interface ArtistResolved {
   pick: ArtistPick;
   /** The artist's top tracks on Spotify, most popular first; empty if not found. */
   tracks: Track[];
+  /** The artist's genres on Spotify, when Spotify gives them. */
+  genres?: string[];
+}
+
+/** At most this many cards of one genre family in a deck of DECK_SIZE. */
+export const MAX_PER_GENRE = 4;
+
+/**
+ * Broad families, most specific first: "jazz rap" is hip hop, "rap metal"
+ * is hip hop, "dream pop" stays its own label. Labels that match none stay
+ * as they are.
+ */
+const FAMILIES: [string, RegExp][] = [
+  ["hip hop", /\b(hip ?hop|rap|trap|drill|grime|boom bap|g funk|phonk|crunk)\b/],
+  ["metal", /\bmetal\b/],
+  ["r&b", /\b(r ?b|rnb|r and b|neo soul|soul|motown)\b/],
+  [
+    "electronic",
+    /\b(electronic|house|techno|edm|dubstep|trance|drum and bass|dnb|electro|idm|breakbeat|garage)\b/,
+  ],
+  ["rock", /\b(rock|punk|grunge|shoegaze|emo|post punk)\b/],
+  ["jazz", /\b(jazz|bebop|swing|bossa nova)\b/],
+  ["folk", /\b(folk|singer songwriter|americana|bluegrass)\b/],
+  ["country", /\bcountry\b/],
+  ["latin", /\b(latin|reggaeton|salsa|bachata|cumbia|samba|tango)\b/],
+  ["reggae", /\b(reggae|dancehall|dub|ska)\b/],
+  ["classical", /\b(classical|baroque|opera|orchestral|chamber)\b/],
+  ["blues", /\bblues\b/],
+];
+
+/** The broad family of a genre label ("conscious hip hop" → "hip hop"); null when none fits. */
+export function knownFamily(label: string): string | null {
+  const s = normalize(label);
+  for (const [family, re] of FAMILIES) if (re.test(s)) return family;
+  return null;
+}
+
+/**
+ * The family a card counts toward. Spotify's own genres for the artist come
+ * first: they say "hip hop" for a rapper Claude calls "jazz". Pure.
+ */
+export function genreFamily(claudeTag: string | undefined, spotifyGenres: string[] = []): string {
+  for (const g of spotifyGenres) {
+    const f = knownFamily(g);
+    if (f) return f;
+  }
+  if (!claudeTag) return "";
+  return knownFamily(claudeTag) ?? normalize(claudeTag);
+}
+
+/** How many cards of each family a list holds. */
+function familyCounts(cards: Card[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const c of cards) {
+    const f = c.genre ?? genreFamily(c.tags[0]);
+    if (f) counts.set(f, (counts.get(f) ?? 0) + 1);
+  }
+  return counts;
 }
 
 /** Versions that don't introduce an artist well. */
@@ -197,9 +257,13 @@ export function deckFromArtists(
   const liked = new Set(data.yes.map((t) => firstArtist(t.artist)));
   const refused = new Set(data.no.map((s) => firstArtist(s.artist)).filter((a) => !liked.has(a)));
   let familiar = have.filter((c) => known.artists.has(firstArtist(c.track.artist))).length;
+  const perGenre = familyCounts(have);
   const cards: Card[] = [];
-  for (const { pick, tracks } of resolved) {
+  for (const { pick, tracks, genres } of resolved) {
     if (have.length + cards.length >= DECK_SIZE) break;
+    // No deck is mostly one genre, whatever Claude sends.
+    const genre = genreFamily(pick.tags?.[0], genres);
+    if (genre && (perGenre.get(genre) ?? 0) >= MAX_PER_GENRE) continue;
     const name = firstArtist(tracks[0]?.artist ?? pick.artist);
     if (artists.has(name) || refused.has(name) || refused.has(firstArtist(pick.artist))) continue;
     const knownArtist = known.artists.has(name) || known.artists.has(firstArtist(pick.artist));
@@ -213,6 +277,7 @@ export function deckFromArtists(
     seen.add(songKey(track.artist, track.title));
     artists.add(name);
     if (knownArtist) familiar++;
+    if (genre) perGenre.set(genre, (perGenre.get(genre) ?? 0) + 1);
     // Claude gives genre and mood; the era comes from the song itself.
     const tags = [
       ...new Set([
@@ -220,7 +285,7 @@ export function deckFromArtists(
         ...(track.year ? [decade(track.year)] : []),
       ]),
     ];
-    cards.push({ track, reason: pick.reason, tags: tags.slice(0, 4) });
+    cards.push({ track, reason: pick.reason, tags: tags.slice(0, 4), ...(genre ? { genre } : {}) });
   }
   return cards;
 }
@@ -235,17 +300,19 @@ export function ownTracks(tracks: Track[], artistName: string): Track[] {
 }
 
 /** An artist's own top tracks on Spotify; none when Spotify doesn't have the artist. */
-async function artistTracks(pick: ArtistPick): Promise<Track[]> {
+async function artistTracks(pick: ArtistPick): Promise<{ tracks: Track[]; genres: string[] }> {
+  const none = { tracks: [], genres: [] };
   try {
     const artist = await spotify.findArtist(pick.artist);
-    if (!artist) return [];
-    return ownTracks(await spotify.artistTopTracks(artist.id), artist.name ?? pick.artist);
+    if (!artist) return none;
+    const tracks = ownTracks(await spotify.artistTopTracks(artist.id), artist.name ?? pick.artist);
+    return { tracks, genres: artist.genres ?? [] };
   } catch (e) {
     // Not about this artist: the login ran out, or Spotify's rate limit. The deck must say so.
     if (e instanceof spotify.SessionExpiredError) throw e;
     if (e instanceof spotify.SpotifyError && [401, 429].includes(e.status)) throw e;
     // Treated as not found; the deck is built from the rest.
-    return [];
+    return none;
   }
 }
 
@@ -340,9 +407,9 @@ async function knownFrom(data: TrainData, l: Listening, candidateIds: string[]):
  * three short answers arrive together, in about the time of one.
  */
 const BATCHES: { focus: DeckFocus; count: number }[] = [
-  { focus: "close", count: 6 },
-  { focus: "adjacent", count: 8 },
-  { focus: "wildcard", count: 6 },
+  { focus: "close", count: 5 },
+  { focus: "adjacent", count: 9 },
+  { focus: "wildcard", count: 8 },
 ];
 
 /** How many of the latest cards count as "shown lately" (three decks). */
@@ -354,14 +421,16 @@ const RECENT_CARDS = 45;
  * next deck moves away from what the last ones were full of. Pure.
  */
 export function recentGenres(
-  history: { tags: string[] }[],
+  history: { tags: string[]; genre?: string }[],
   waiting: Card[] = [],
   max = 8,
 ): { genre: string; cards: number }[] {
   const counts = new Map<string, number>();
-  const mains = [...history.slice(-RECENT_CARDS).map((j) => j.tags[0]), ...waiting.map((c) => c.tags[0])];
-  for (const tag of mains) {
-    const genre = tag?.trim().toLowerCase();
+  const mains = [
+    ...history.slice(-RECENT_CARDS).map((j) => j.genre ?? genreFamily(j.tags[0])),
+    ...waiting.map((c) => c.genre ?? genreFamily(c.tags[0])),
+  ];
+  for (const genre of mains) {
     if (genre) counts.set(genre, (counts.get(genre) ?? 0) + 1);
   }
   return [...counts]
@@ -403,11 +472,15 @@ export async function buildDeck(
     ],
     150,
   );
+  const seen = recentGenres(data.history, avoid);
+  const seenTotal = seen.reduce((n, g) => n + g.cards, 0);
   const base = {
     loved: [...data.yes.slice(-15), ...listening.topTracks.slice(0, 10)].map(ref),
     top_artists: listening.topArtists,
     judged_artists: judged,
-    seen_genres: recentGenres(data.history, avoid),
+    seen_genres: seen,
+    // A family that filled a third or more of the latest cards: the other answers stay out of it.
+    crowded_genres: seen.filter((g) => g.cards >= Math.max(3, seenTotal / 3)).map((g) => g.genre),
     taste: buildTaste(data.history, { muted: data.muted }),
   };
   // Songs waiting in the current deck count as judged here: never dealt twice.
@@ -430,15 +503,15 @@ export async function buildDeck(
 
   /** One artist's songs, and which of them the listener already knows. */
   const lookUp = async (pick: ArtistPick): Promise<LookedUp> => {
-    const tracks = await limit(() => artistTracks(pick));
+    const { tracks, genres } = await limit(() => artistTracks(pick));
     const ids = tracks.map((t) => t.id);
     const known = await limit(() => knownFrom(data, listening, ids));
-    return { pick, tracks, known };
+    return { pick, tracks, genres, known };
   };
-  const deal = ({ pick, tracks, known }: LookedUp) => {
+  const deal = ({ pick, tracks, genres, known }: LookedUp) => {
     stats.asked++;
     if (tracks.length > 0) stats.found++;
-    const fresh = deckFromArtists([{ pick, tracks }], judgedData, known, cards);
+    const fresh = deckFromArtists([{ pick, tracks, genres }], judgedData, known, cards);
     cards.push(...fresh);
     announce(fresh);
     if (cards.length >= FIRST_CARDS) enough();
@@ -490,11 +563,15 @@ export async function buildDeck(
         failed(e);
         return [];
       });
+      const perGenre = familyCounts(cards);
       for (const c of more) {
         if (cards.length >= DECK_SIZE) break;
         if (artists.has(firstArtist(c.track.artist))) continue;
+        const genre = genreFamily(c.tags[0]);
+        if (genre && (perGenre.get(genre) ?? 0) >= MAX_PER_GENRE) continue;
+        if (genre) perGenre.set(genre, (perGenre.get(genre) ?? 0) + 1);
         artists.add(firstArtist(c.track.artist));
-        cards.push(c);
+        cards.push(genre ? { ...c, genre } : c);
         announce([c]);
       }
     }
@@ -631,6 +708,7 @@ export async function judge(
     dwellMs: Math.max(0, Math.round(dwellMs)),
     at: Date.now(),
     ...(card.deck ? { deck: card.deck } : {}),
+    ...(card.genre ? { genre: card.genre } : {}),
   };
   const withHistory = { ...data, history: [...data.history, judgement].slice(-1000) };
   if (verdict === "later") {

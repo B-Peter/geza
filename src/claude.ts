@@ -276,6 +276,10 @@ Rules:
 - "seen_genres" counts the main genres of the cards they were shown
   lately. For "adjacent" and "wildcard", avoid the genres with the highest
   counts; for "close", at most one artist from the highest one.
+- "crowded_genres" are genre families the last decks were full of. In an
+  "adjacent" or "wildcard" answer, name NO artist whose main genre is in
+  that family or any of its subgenres (e.g. for "hip hop": no rap, trap,
+  jazz rap, conscious hip hop, drill). The app drops such cards anyway.
 - Vary eras and countries. Prefer artists with a loyal following over
   chart acts, unless "taste.popularity" is "well-known".
 - "taste" summarises their swipes: favour liked_tags, liked_eras,
@@ -307,6 +311,8 @@ export interface DeckInput {
   judged_artists: string[];
   /** Main genres of the cards shown lately, most frequent first, so decks spread out. */
   seen_genres: { genre: string; cards: number }[];
+  /** Genre families the last decks were full of: kept out of the adjacent and wildcard answers. */
+  crowded_genres: string[];
   taste: TasteProfile;
 }
 

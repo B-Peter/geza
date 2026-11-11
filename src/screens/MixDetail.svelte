@@ -1,4 +1,5 @@
 <script lang="ts">
+import { untrack } from "svelte";
 import { badge, loadLedger, type MixLedger } from "../ledger.js";
 import { loadSnapshots, type MixId, type Mode, SWAP_PCT } from "../mixes.js";
 import { undoLastSwap } from "../prepare.js";
@@ -40,10 +41,15 @@ $effect(() => {
   void loadLedger(id).then((l) => (ledger = l));
 });
 
+// Only a different mix reloads the list. load() reads the mix, and without
+// untrack every mode, sound or lock change would empty the list and jump
+// the page back to the top.
 $effect(() => {
   void id;
-  tracks = null;
-  void load();
+  untrack(() => {
+    tracks = null;
+    void load();
+  });
 });
 
 const modes: { id: Mode; label: string; hint: () => string }[] = [

@@ -121,8 +121,9 @@ describe("deckFromArtists", () => {
 
 describe("deckFromArtists, adding to a deck", () => {
   const known = { trackIds: new Set<string>(), artists: new Set(["k1", "k2", "k3", "k4"]) };
+  // Each artist its own genre here: the genre cap has its own test.
   const deal = (name: string, want: "hit" | "deep cut" = "hit") => ({
-    pick: artist(name, want),
+    pick: { ...artist(name, want), tags: [`genre ${name}`] },
     tracks: top(name, ["x", "y"]),
   });
   it("returns only new cards: no artist twice, the familiar cap counts across the whole deck", () => {
@@ -207,5 +208,33 @@ describe("artists you said no to, and songs an artist only features on", () => {
       t("Small Act, Guest", "Own 2"),
     ];
     expect(ownTracks(tracks, "Small Act").map((x) => x.title)).toEqual(["Own", "Own 2"]);
+  });
+});
+
+describe("genre families and the cap per deck", () => {
+  it("folds subgenres into one family, Spotify's genres first", async () => {
+    const { genreFamily } = await import("../src/train.js");
+    expect(genreFamily("Conscious Hip-Hop")).toBe("hip hop");
+    expect(genreFamily("jazz rap")).toBe("hip hop");
+    expect(genreFamily("trap")).toBe("hip hop");
+    expect(genreFamily("dream pop")).toBe("dream pop");
+    expect(genreFamily("jazz", ["alternative hip hop", "jazz rap"])).toBe("hip hop");
+    expect(genreFamily("bossa nova")).toBe("jazz");
+  });
+
+  it("deals at most MAX_PER_GENRE cards of one family, however many Claude sends", async () => {
+    const { deckFromArtists: deal, MAX_PER_GENRE } = await import("../src/train.js");
+    const rapper = (n: number) => ({
+      pick: { artist: `R${n}`, want: "hit" as const, reason: "r", tags: [n % 2 ? "rap" : "boom bap"] },
+      tracks: [{ id: `r${n}`, uri: `u:r${n}`, artist: `R${n}`, title: `Song ${n}`, durationMs: 200_000 }],
+    });
+    const jazz = {
+      pick: { artist: "J", want: "hit" as const, reason: "r", tags: ["jazz"] },
+      tracks: [{ id: "j", uri: "u:j", artist: "J", title: "Blue", durationMs: 200_000 }],
+    };
+    const known = { trackIds: new Set<string>(), artists: new Set<string>() };
+    const cards = deal([...Array.from({ length: 10 }, (_, i) => rapper(i)), jazz], empty, known);
+    expect(cards.filter((c) => c.genre === "hip hop")).toHaveLength(MAX_PER_GENRE);
+    expect(cards.at(-1)?.track.artist).toBe("J");
   });
 });

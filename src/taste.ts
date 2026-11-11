@@ -26,6 +26,8 @@ export interface Judgement {
   at: number;
   /** The deck it was in (the deck's "at"). */
   deck?: number;
+  /** The song's genre family (see genreFamily), for spreading decks. */
+  genre?: string;
 }
 
 export interface TasteProfile {

@@ -7,9 +7,9 @@ import * as store from "./store.js";
 import { songKey } from "./text.js";
 import { buildDeck, type Card, type Deck, type TrainData } from "./train.js";
 
-const KEY = "deck.ready.2";
-// A deck saved before genres were spread out isn't worth playing: drop it.
-void store.remove("deck.ready").catch(() => {});
+const KEY = "deck.ready.3";
+// Decks saved before the genre cap could be all one genre: drop them.
+for (const old of ["deck.ready", "deck.ready.2"]) void store.remove(old).catch(() => {});
 /** A saved deck with fewer unjudged songs than this isn't worth starting. */
 export const MIN_SAVED = 3;
 const MAX_AGE_MS = 30 * 24 * 3_600_000;

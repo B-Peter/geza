@@ -1,7 +1,6 @@
 <script lang="ts">
 import { loadLedger } from "../ledger.js";
-import { loadPending, type Mix, type MixId } from "../mixes.js";
-import { fillMix } from "../prepare.js";
+import type { Mix, MixId } from "../mixes.js";
 import * as spotify from "../spotify.js";
 import { openUri } from "../spotify.js";
 import { app } from "../state.svelte.js";
@@ -10,7 +9,6 @@ import Cover from "../ui/Cover.svelte";
 import Icon from "../ui/Icon.svelte";
 import TabBar from "../ui/TabBar.svelte";
 
-const now = Date.now();
 const DAY_MS = 24 * 3_600_000;
 /** After this many days a mix that changes is due for a swap. */
 const DUE_DAYS = 7;
@@ -34,16 +32,19 @@ async function loadSizes() {
 // Learning reads the playlists: the sizes are fresh after it.
 $effect(() => {
   void app.learned;
+  void app.mixesChanged;
   void loadSizes();
 });
 
 const empty = $derived(app.mixes.filter((m) => sizes[m.id] === 0));
 
-const daysSince = (mix: Mix) => (mix.lastAppliedAt ? Math.floor((now - mix.lastAppliedAt) / DAY_MS) : null);
+// The clock is read each time: a swap can finish after this screen opened.
+const daysSince = (mix: Mix) =>
+  mix.lastAppliedAt ? Math.max(0, Math.floor((Date.now() - mix.lastAppliedAt) / DAY_MS)) : null;
 const due = (mix: Mix) => mix.mode !== "keep" && sizes[mix.id] !== 0 && (daysSince(mix) ?? 0) >= DUE_DAYS;
 
 function status(mix: Mix): string {
-  if (app.preparing[mix.id]) return "Preparing a swap…";
+  if (app.preparing[mix.id]) return sizes[mix.id] === 0 ? "Filling…" : "Preparing a swap…";
   if (app.pending[mix.id]) return "Swap ready";
   if (sizes[mix.id] === 0) return "Empty";
   if (mix.mode === "keep") return "Kept as is";
@@ -53,33 +54,10 @@ function status(mix: Mix): string {
   return days === 0 ? "Swapped today" : days === 1 ? "Swapped yesterday" : `Swapped ${days} days ago`;
 }
 
-/** Fill every empty mix, one after the other. Nothing is in them, so there is nothing to review. */
-async function fillAll() {
-  const todo = empty.map((m) => m.id);
-  let filled = 0;
-  await app.task("Starting…", async (progress) => {
-    for (const [i, id] of todo.entries()) {
-      const mix = $state.snapshot(app.mix(id)) as Mix;
-      const step = todo.length > 1 ? `${mix.name} (${i + 1} of ${todo.length}): ` : "";
-      const updated = await fillMix(mix, (m) => progress(step + m));
-      if (!updated) {
-        // It wasn't empty after all: the swap waits for a review.
-        app.pending[id] = (await loadPending(id)) ?? undefined;
-        continue;
-      }
-      delete app.pending[id];
-      await app.updateMix(id, {
-        lastAppliedAt: updated.lastAppliedAt,
-        blocked: updated.blocked,
-        reasons: updated.reasons,
-      });
-      filled++;
-    }
-  });
-  await loadSizes();
-  if (filled > 0)
-    app.notify(filled === 1 ? "Mix filled in Spotify." : `${filled} mixes filled in Spotify.`, "ok");
-}
+/** Mixes being filled right now, with what each is doing. */
+const filling = $derived(app.mixes.filter((m) => sizes[m.id] === 0 && app.preparing[m.id]));
+/** Empty mixes nobody is filling yet. */
+const waiting = $derived(empty.filter((m) => !app.preparing[m.id]));
 
 const first = $derived(app.mixes[0]);
 </script>
@@ -110,17 +88,29 @@ const first = $derived(app.mixes[0]);
     </a>
   {/if}
 
-  {#if empty.length > 0}
+  {#if filling.length > 0}
+    <div class="card reconnect" role="status" aria-live="polite">
+      <div class="reconnect-title">
+        Filling {filling.length === 1 ? filling[0]?.name : `${filling.length} mixes`}…
+      </div>
+      <ul class="progress small">
+        {#each filling as m (m.id)}
+          <li><span class="dot mix-{m.id}" aria-hidden="true"></span><strong>{m.name}</strong> · {app.preparing[m.id]}</li>
+        {/each}
+      </ul>
+      <p class="small muted">Keep using Géza: swipe a deck meanwhile. Each tile says when its mix is ready.</p>
+    </div>
+  {:else if waiting.length > 0}
     <div class="card reconnect" role="status">
       <div class="reconnect-title">
-        {empty.length === app.mixes.length ? "Your mixes are empty" : empty.length === 1 ? `${empty[0]?.name} is empty` : `${empty.length} mixes are empty`}
+        {waiting.length === app.mixes.length ? "Your mixes are empty" : waiting.length === 1 ? `${waiting[0]?.name} is empty` : `${waiting.length} mixes are empty`}
       </div>
       <p class="small muted">
-        Claude picks 25 songs for {empty.length === 1 ? "it" : "each"}, from your listening and your swipes.
-        {empty.length > 1 ? "This takes a minute or two." : ""}
+        Claude picks 25 songs for {waiting.length === 1 ? "it" : "each"}, from your listening and your swipes. It runs in
+        the background.
       </p>
-      <button class="btn small" onclick={fillAll} disabled={!!app.busy}>
-        {empty.length === 1 ? "Fill it" : `Fill all ${empty.length}`}
+      <button class="btn small" onclick={() => app.fillEmpty(waiting.map((m) => m.id))}>
+        {waiting.length === 1 ? "Fill it" : `Fill all ${waiting.length}`}
       </button>
     </div>
   {/if}
@@ -191,6 +181,9 @@ const first = $derived(app.mixes[0]);
   .reconnect-title { font-weight: 700; }
   .reconnect p { margin: 0 0 6px; }
   .learned { margin: 12px 8px 0; }
+  .progress { list-style: none; margin: 2px 0 4px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .progress li { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; flex: none; border-radius: 50%; }
   .random { margin-top: 12px; min-height: 72px; }
   .random.nudge { background: var(--lime); }
   .random.nudge .ico { background: var(--white); }
