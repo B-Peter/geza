@@ -165,3 +165,12 @@ describe("findTrack", () => {
     expect(matchTrack(items as never, "Sundial", "Blue Hour")?.id).toBe("2");
   });
 });
+
+describe("nameWithin", () => {
+  it("matches whole words only", async () => {
+    const { nameWithin } = await import("../src/spotify.js");
+    expect(nameWithin("the national", "national")).toBe(true);
+    expect(nameWithin("yellow days", "low")).toBe(false);
+    expect(nameWithin("", "low")).toBe(false);
+  });
+});

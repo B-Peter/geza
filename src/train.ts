@@ -176,7 +176,8 @@ export function chooseTrack(pick: ArtistPick, tracks: Track[], usable: (t: Track
 
 /**
  * One card per artist, in Claude's order: never a song you know or judged,
- * never an artist twice, at most MAX_KNOWN_ARTISTS from familiar artists.
+ * never an artist twice or one you said no to, at most MAX_KNOWN_ARTISTS
+ * from familiar artists.
  * "have" is what the deck already holds; only the new cards are returned.
  * Pure.
  */
@@ -190,12 +191,15 @@ export function deckFromArtists(
     [...data.yes, ...data.no, ...have.map((c) => c.track)].map((s) => songKey(s.artist, s.title)),
   );
   const artists = new Set(have.map((c) => firstArtist(c.track.artist)));
+  // A no to an artist stands, unless you also said yes to one of their songs.
+  const liked = new Set(data.yes.map((t) => firstArtist(t.artist)));
+  const refused = new Set(data.no.map((s) => firstArtist(s.artist)).filter((a) => !liked.has(a)));
   let familiar = have.filter((c) => known.artists.has(firstArtist(c.track.artist))).length;
   const cards: Card[] = [];
   for (const { pick, tracks } of resolved) {
     if (have.length + cards.length >= DECK_SIZE) break;
     const name = firstArtist(tracks[0]?.artist ?? pick.artist);
-    if (artists.has(name)) continue;
+    if (artists.has(name) || refused.has(name) || refused.has(firstArtist(pick.artist))) continue;
     const knownArtist = known.artists.has(name) || known.artists.has(firstArtist(pick.artist));
     if (knownArtist && familiar >= MAX_KNOWN_ARTISTS) continue;
     const track = chooseTrack(
@@ -219,11 +223,21 @@ export function deckFromArtists(
   return cards;
 }
 
-/** An artist's top tracks on Spotify; none when Spotify doesn't have the artist. */
+/**
+ * The songs that are the artist's own: Spotify's top tracks also list songs
+ * they only feature on, and such a card would introduce somebody else. Pure.
+ */
+export function ownTracks(tracks: Track[], artistName: string): Track[] {
+  const name = normalize(artistName);
+  return tracks.filter((t) => firstArtist(t.artist) === name);
+}
+
+/** An artist's own top tracks on Spotify; none when Spotify doesn't have the artist. */
 async function artistTracks(pick: ArtistPick): Promise<Track[]> {
   try {
     const artist = await spotify.findArtist(pick.artist);
-    return artist ? await spotify.artistTopTracks(artist.id) : [];
+    if (!artist) return [];
+    return ownTracks(await spotify.artistTopTracks(artist.id), artist.name ?? pick.artist);
   } catch (e) {
     // Not about this artist: the login ran out, or Spotify's rate limit. The deck must say so.
     if (e instanceof spotify.SessionExpiredError) throw e;
@@ -385,7 +399,7 @@ export async function buildDeck(
         .map((j) => j.artist),
       ...data.yes.map((t) => t.artist),
     ],
-    80,
+    150,
   );
   const base = {
     loved: [...data.yes.slice(-15), ...listening.topTracks.slice(0, 10)].map(ref),
@@ -415,11 +429,8 @@ export async function buildDeck(
   /** One artist's songs, and which of them the listener already knows. */
   const lookUp = async (pick: ArtistPick): Promise<LookedUp> => {
     const tracks = await limit(() => artistTracks(pick));
-    const known = await knownFrom(
-      data,
-      listening,
-      tracks.map((t) => t.id),
-    );
+    const ids = tracks.map((t) => t.id);
+    const known = await limit(() => knownFrom(data, listening, ids));
     return { pick, tracks, known };
   };
   const deal = ({ pick, tracks, known }: LookedUp) => {
@@ -509,7 +520,7 @@ export async function buildDeck(
 async function buildDeckByTitles(data: TrainData, l: Listening, known: Known, have: Card[]): Promise<Card[]> {
   const picks = await curate(
     {
-      mix: `Training deck: songs for the listener to judge one by one. At least ${DECK_SIZE - MAX_KNOWN_ARTISTS} must be songs they have very likely never heard, by artists NOT in top_artists or loved: lesser-known tracks and artists that fit their taste. At most ${MAX_KNOWN_ARTISTS} from artists they already know, and never their well-known hits. A varied spread with a few bolder wildcards`,
+      mix: `Training deck: songs for the listener to judge one by one. At least ${DECK_SIZE - MAX_KNOWN_ARTISTS} must be songs they have very likely never heard, by artists NOT in top_artists or loved: lesser-known tracks and artists that fit their taste. At most ${MAX_KNOWN_ARTISTS} from artists they already know, and never their well-known hits. Ignore the familiar / adjacent / wildcard shares: spread the picks over at least 6 different genres, at most 3 songs per genre, with a few bolder wildcards`,
       mode: "renew",
       remove_count: 0,
       add_count: DECK_SIZE + 5,

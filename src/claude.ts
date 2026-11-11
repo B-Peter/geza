@@ -95,6 +95,10 @@ Rules:
   remove count can't be met otherwise.
 - Treat "liked" and "played_often" as the strongest taste signals when
   picking new songs.
+- "discovered" lists songs the listener said yes to one by one, lately,
+  and that are not in this mix. Pick from them first: every one that fits
+  this mix's occasion and Tune goes in before you look further. Leave out
+  the ones that don't fit. They count as familiar territory.
 - If candidates are too few after filtering, return fewer picks, not
   worse ones.
 - Give each pick a reason of 12 words or fewer, plain language.
@@ -155,6 +159,8 @@ export interface CurateInput {
   played_often?: (SongRef & { plays: number })[];
   never_played?: SongRef[];
   remove_first?: SongRef[];
+  /** Train "yes" songs that aren't in this mix yet: the first candidates for it. */
+  discovered?: SongRef[];
   /** From Train swipes (see taste.ts). */
   taste?: TasteProfile;
 }

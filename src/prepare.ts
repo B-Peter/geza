@@ -24,6 +24,7 @@ import {
   swapCounts,
   unblock,
 } from "./swap.js";
+import { songKey } from "./text.js";
 import { loadTrain, trainSignals } from "./train.js";
 
 const ref = (t: { artist: string; title: string }) => ({ artist: t.artist, title: t.title });
@@ -81,6 +82,9 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
   const [topTracks, topArtists] = await Promise.all([spotify.getTopTracks(20), spotify.getTopArtists(20)]);
 
   const trained = trainSignals(await loadTrain());
+  // Never again means never: this mix's own list and every Train "no".
+  const never = [...mix.blocked, ...trained.blocked];
+  const out = new Set([...current, ...never].map((s) => songKey(s.artist, s.title)));
   const input: CurateInput = {
     mix: mix.name,
     mode: mix.mode === "renew" ? "renew" : "tweak",
@@ -89,7 +93,9 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
     tune: mix.tune,
     // Train "yes" songs first: the most explicit taste signal there is.
     loved: [...trained.loved, ...uniqueRefs([...mix.locked, ...topTracks], 25)].slice(0, 40),
-    blocked: [...mix.blocked, ...trained.blocked],
+    blocked: never,
+    // Songs you said yes to in Train and that aren't here yet.
+    discovered: trained.loved.filter((s) => !out.has(songKey(s.artist, s.title))),
     taste: trained.taste,
     locked: mix.locked.map(ref),
     current: current.map(ref),
@@ -103,7 +109,7 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
   const removals = matchRemovals(picks.remove, current, mix.locked, counts.remove);
   onProgress("Finding the songs on Spotify…");
   let resolved = await resolveAll(picks.add);
-  let { add, missing } = filterAdditions(resolved, current, removals, mix.blocked, counts.add);
+  let { add, missing } = filterAdditions(resolved, current, removals, never, counts.add);
   let picked = picks.add.length;
 
   // One replacement round for picks that weren't found or were unusable.
@@ -119,13 +125,7 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
     });
     resolved = await resolveAll(retry.add);
     picked += retry.add.length;
-    const more = filterAdditions(
-      resolved,
-      [...current, ...add.map((a) => a.track)],
-      removals,
-      mix.blocked,
-      short,
-    );
+    const more = filterAdditions(resolved, [...current, ...add.map((a) => a.track)], removals, never, short);
     add = [...add, ...more.add];
     missing = [...missing, ...more.missing];
   }

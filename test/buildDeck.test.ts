@@ -34,7 +34,7 @@ vi.mock("../src/spotify.js", () => ({
   SessionExpiredError: class extends Error {},
   SpotifyError: class extends Error {},
   findAll: async () => [],
-  findArtist: async (name: string) => ({ id: name }),
+  findArtist: async (name: string) => ({ id: name, name }),
   artistTopTracks: async (id: string) => [
     { id: `${id}-1`, uri: `spotify:track:${id}-1`, artist: id, title: `${id} song`, durationMs: 200_000 },
   ],

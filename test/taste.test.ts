@@ -47,6 +47,7 @@ describe("buildTaste", () => {
       j("yes", { tags: ["indie rock", "driving"], year: 1994, artist: "Fifth Gear" }),
       j("no", { tags: ["ballad"], year: 2021, dwellMs: 3_000 }),
       j("no", { tags: ["ballad", "slow"], year: 2023, dwellMs: 4_000 }),
+      j("no", { tags: ["ballad"], year: 2022, dwellMs: 4_000 }),
     ]);
     expect(p.liked_tags[0]).toBe("indie rock");
     expect(p.liked_tags).toContain("driving");
@@ -54,6 +55,20 @@ describe("buildTaste", () => {
     expect(p.liked_eras).toEqual(["1990s"]);
     expect(p.disliked_eras).toEqual(["2020s"]);
     expect(p.liked_artists).toEqual(["Fifth Gear"]);
+  });
+
+  it("needs three no's before a label is avoided: two could be the songs, not the genre", () => {
+    const two = [j("no", { tags: ["jazz"] }), j("no", { tags: ["jazz"] }), j("yes", { tags: ["rock"] })];
+    expect(buildTaste(two).disliked_tags).toEqual([]);
+    expect(buildTaste([...two, j("no", { tags: ["jazz"] })]).disliked_tags).toEqual(["jazz"]);
+  });
+
+  it("keeps a no to the genre that fills most of the decks", () => {
+    const hipHop = [1, 2, 3, 4, 5, 6, 7].map(() => j("no", { tags: ["hip hop"] }));
+    const other = [1, 2].map(() => j("yes", { tags: ["soul"] }));
+    const p = buildTaste([...hipHop, ...other]);
+    expect(p.disliked_tags).toEqual(["hip hop"]);
+    expect(p.liked_tags).toEqual(["soul"]);
   });
 
   it("a quick no outweighs a hesitant yes", () => {

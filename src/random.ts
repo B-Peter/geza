@@ -86,7 +86,7 @@ export async function prepareRandom(
 
   onProgress("Finding the songs on Spotify…");
   const resolved = await spotify.findAll(picks.add);
-  const { add } = filterAdditions(resolved, [], [], [], RANDOM_SIZE);
+  const { add } = filterAdditions(resolved, [], [], trained.blocked, RANDOM_SIZE);
   if (add.length === 0) throw new Error("None of Claude's picks were found on Spotify. Try again.");
   const uris = add.map((a) => (a.track as Track).uri);
   const tagsOf = new Map(resolved.map((r) => [r.track?.id ?? "", (r.pick.tags ?? []).slice(0, 4)]));

@@ -59,8 +59,11 @@ export const MIN_JUDGED = 3;
 export const HALF_LIFE_MS = 60 * 24 * 3600 * 1000;
 /** A label needs at least this many swipes behind it to mean anything. */
 export const MIN_COUNT = 2;
-/** A tag on more than this share of judged songs says nothing about taste. */
-const COMMON_SHARE = 0.6;
+/**
+ * A dislike needs more behind it than a like: a disliked label is avoided
+ * from then on, so no new swipes arrive that could prove it wrong.
+ */
+export const MIN_DISLIKE_COUNT = 3;
 /** MusicBrainz genres are community labels: worth more than Claude's own tags. */
 const GENRE_BONUS = 0.5;
 
@@ -129,15 +132,18 @@ function standings(votes: Vote[]): Standing[] {
   }));
 }
 
-/** Highest-scoring keys at or above `min`, and lowest at or below `-min`. */
-function split(list: Standing[], min: number, max = 8): [string[], string[]] {
+/**
+ * Highest-scoring keys at or above `min`, and lowest at or below `-min`
+ * (those with at least `minDislike` swipes behind them).
+ */
+function split(list: Standing[], min: number, max = 8, minDislike = MIN_DISLIKE_COUNT): [string[], string[]] {
   const sorted = [...list].sort((a, b) => b.score - a.score);
   const liked = sorted
     .filter((s) => s.score >= min)
     .slice(0, max)
     .map((s) => s.key);
   const disliked = sorted
-    .filter((s) => s.score <= -min)
+    .filter((s) => s.score <= -min && s.count >= minDislike)
     .reverse()
     .slice(0, max)
     .map((s) => s.key);
@@ -166,12 +172,10 @@ export function explain(history: Judgement[], options: TasteOptions = {}): Recor
     const genres = new Set((j.genres ?? []).map(norm));
     return [...new Set(j.tags.map(norm))].map((key) => vote(j, key, genres.has(key) ? 1 + GENRE_BONUS : 1));
   });
-  // A tag on most songs you judged can't tell your yes from your no.
-  const common = decided.length >= 5 ? decided.length * COMMON_SHARE : Number.POSITIVE_INFINITY;
+  // A tag on most of the songs still counts: mixed swipes score near zero by
+  // themselves, and "no" to most of it is exactly what must not be lost.
   const keep = (dimension: Dimension) => (s: Standing) =>
-    s.count >= MIN_COUNT &&
-    !muted.has(mutedKey(dimension, s.key)) &&
-    (dimension !== "tag" || s.count <= common);
+    s.count >= MIN_COUNT && !muted.has(mutedKey(dimension, s.key));
 
   return {
     tag: standings(tagVotes).filter(keep("tag")),
@@ -206,7 +210,8 @@ export function buildTaste(history: Judgement[], options: TasteOptions = {}): Ta
   const dims = explain(history, options);
   const [likedTags, dislikedTags] = split(dims.tag, 1);
   const [likedEras, dislikedEras] = split(dims.era, 1, 4);
-  const [likedArtists, dislikedArtists] = split(dims.artist, 1, 10);
+  // Two songs by one artist is already a lot of that artist.
+  const [likedArtists, dislikedArtists] = split(dims.artist, 1, 10, MIN_COUNT);
   // Countries need a clear pattern (three songs' worth), not a couple.
   const [likedCountries, dislikedCountries] = split(dims.country, 1.5, 4);
 

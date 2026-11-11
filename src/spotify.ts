@@ -489,18 +489,21 @@ function chunk<T>(list: T[], size: number): T[][] {
   return out;
 }
 
-/** Resolve an artist/title pair from Claude to a Spotify track, or null. */
+/**
+ * One name inside the other as whole words: "National" matches "The
+ * National", but "Low" doesn't match "Yellow Days". Both normalised.
+ */
+export function nameWithin(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  return ` ${a} `.includes(` ${b} `) || ` ${b} `.includes(` ${a} `);
+}
+
 /** Does any of the track's artists match the one we asked for (exactly or loosely)? */
 function byArtist(items: SpotifyTrack[], artist: string): SpotifyTrack | undefined {
   const wanted = normalize(artist.split(",")[0] ?? artist);
   return (
     items.find((t) => t.artists.some((a) => normalize(a.name) === wanted)) ??
-    items.find((t) =>
-      t.artists.some((a) => {
-        const n = normalize(a.name);
-        return n.includes(wanted) || wanted.includes(n);
-      }),
-    )
+    items.find((t) => t.artists.some((a) => nameWithin(normalize(a.name), wanted)))
   );
 }
 
@@ -548,7 +551,7 @@ export interface Artist {
   popularity?: number;
 }
 
-/** Find an artist by name: exact (normalised) match first, then the closest. */
+/** Find an artist by name: exact (normalised) match first, then one name within the other. */
 export async function findArtist(name: string): Promise<Artist | null> {
   const json = await api<{ artists?: { items: Artist[] } }>("/search", {
     query: { q: name, type: "artist", market: MARKET, limit: 5 },
@@ -557,7 +560,7 @@ export async function findArtist(name: string): Promise<Artist | null> {
   const wanted = normalize(name);
   const hit =
     items.find((a) => normalize(a.name) === wanted) ??
-    items.find((a) => normalize(a.name).includes(wanted) || wanted.includes(normalize(a.name)));
+    items.find((a) => nameWithin(normalize(a.name), wanted));
   return hit ? { id: hit.id, name: hit.name, genres: hit.genres ?? [], popularity: hit.popularity } : null;
 }
 

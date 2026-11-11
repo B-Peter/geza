@@ -174,3 +174,38 @@ describe("recentGenres", () => {
     ]);
   });
 });
+
+describe("artists you said no to, and songs an artist only features on", () => {
+  it("doesn't deal another song by an artist you said no to", async () => {
+    const { deckFromArtists: deal } = await import("../src/train.js");
+    const pick = (name: string) => ({
+      pick: { artist: name, want: "hit" as const, reason: "r", tags: ["rock"] },
+      tracks: [
+        { id: `${name}-2`, uri: `u:${name}`, artist: name, title: `${name} other`, durationMs: 200_000 },
+      ],
+    });
+    const data = {
+      yes: [{ id: "b1", uri: "u:b1", artist: "Both", title: "Liked one" }],
+      no: [
+        { artist: "Refused", title: "First" },
+        { artist: "Both", title: "Not this one" },
+      ],
+      playlistId: null,
+      history: [],
+    };
+    const known = { trackIds: new Set<string>(), artists: new Set<string>() };
+    const cards = deal([pick("Refused"), pick("Both"), pick("New")], data, known);
+    expect(cards.map((c) => c.track.artist)).toEqual(["Both", "New"]);
+  });
+
+  it("keeps only the artist's own songs", async () => {
+    const { ownTracks } = await import("../src/train.js");
+    const t = (artist: string, title: string) => ({ id: title, uri: `u:${title}`, artist, title });
+    const tracks = [
+      t("Big Star, Small Act", "Feature"),
+      t("Small Act", "Own"),
+      t("Small Act, Guest", "Own 2"),
+    ];
+    expect(ownTracks(tracks, "Small Act").map((x) => x.title)).toEqual(["Own", "Own 2"]);
+  });
+});
