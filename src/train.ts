@@ -321,10 +321,35 @@ async function knownFrom(data: TrainData, l: Listening, candidateIds: string[]):
  * three short answers arrive together, in about the time of one.
  */
 const BATCHES: { focus: DeckFocus; count: number }[] = [
-  { focus: "close", count: 8 },
-  { focus: "adjacent", count: 7 },
-  { focus: "wildcard", count: 5 },
+  { focus: "close", count: 6 },
+  { focus: "adjacent", count: 8 },
+  { focus: "wildcard", count: 6 },
 ];
+
+/** How many of the latest cards count as "shown lately" (three decks). */
+const RECENT_CARDS = 45;
+
+/**
+ * The main genres of the cards shown lately, most frequent first. A card's
+ * main genre is Claude's first tag. Sent with every deck request, so the
+ * next deck moves away from what the last ones were full of. Pure.
+ */
+export function recentGenres(
+  history: { tags: string[] }[],
+  waiting: Card[] = [],
+  max = 8,
+): { genre: string; cards: number }[] {
+  const counts = new Map<string, number>();
+  const mains = [...history.slice(-RECENT_CARDS).map((j) => j.tags[0]), ...waiting.map((c) => c.tags[0])];
+  for (const tag of mains) {
+    const genre = tag?.trim().toLowerCase();
+    if (genre) counts.set(genre, (counts.get(genre) ?? 0) + 1);
+  }
+  return [...counts]
+    .map(([genre, cards]) => ({ genre, cards }))
+    .sort((a, b) => b.cards - a.cards)
+    .slice(0, max);
+}
 /** The deck starts as soon as it has this many cards: one to play, one to swipe to. */
 export const FIRST_CARDS = 2;
 
@@ -363,6 +388,7 @@ export async function buildDeck(
     loved: [...data.yes.slice(-15), ...listening.topTracks.slice(0, 10)].map(ref),
     top_artists: listening.topArtists,
     judged_artists: judged,
+    seen_genres: recentGenres(data.history, avoid),
     taste: buildTaste(data.history, { muted: data.muted }),
   };
   // Songs waiting in the current deck count as judged here: never dealt twice.

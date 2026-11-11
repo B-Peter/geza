@@ -158,3 +158,19 @@ describe("deckOutcome", () => {
     expect(deckOutcome(data, 1)).toEqual({ yes: 1, no: 1, later: 1 });
   });
 });
+
+describe("recentGenres", () => {
+  it("counts the first tag of the latest cards, most frequent first", async () => {
+    const { recentGenres } = await import("../src/train.js");
+    const history = [
+      { tags: ["Hip Hop", "driving"] },
+      { tags: ["hip hop", "mellow"] },
+      { tags: ["jazz", "mellow"] },
+      { tags: [] },
+    ];
+    expect(recentGenres(history)).toEqual([
+      { genre: "hip hop", cards: 2 },
+      { genre: "jazz", cards: 1 },
+    ]);
+  });
+});

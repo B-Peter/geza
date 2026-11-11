@@ -259,6 +259,17 @@ Rules:
   = neighbouring genres, other eras, other countries or languages in the
   same spirit; "wildcard" = bold picks from further away that could still
   land.
+- Spread the genres. A deck that is all one genre teaches nothing about
+  the rest of their taste. In this answer no more than 2 artists may share
+  a main genre (3 when focus is "close"). For "adjacent", every artist's
+  main genre must differ from the genre that dominates "loved" and
+  "top_artists". For "wildcard", pick genres that appear nowhere in
+  "loved", "top_artists" or "taste.liked_tags", each artist a different
+  genre family (e.g. jazz, folk, electronic, rock, soul, classical,
+  country, metal, latin, african, asian pop).
+- "seen_genres" counts the main genres of the cards they were shown
+  lately. For "adjacent" and "wildcard", avoid the genres with the highest
+  counts; for "close", at most one artist from the highest one.
 - Vary eras and countries. Prefer artists with a loyal following over
   chart acts, unless "taste.popularity" is "well-known".
 - "taste" summarises their swipes: favour liked_tags, liked_eras,
@@ -288,6 +299,8 @@ export interface DeckInput {
   top_artists: string[];
   /** Artists already judged in Train (any verdict), so decks don't repeat. */
   judged_artists: string[];
+  /** Main genres of the cards shown lately, most frequent first, so decks spread out. */
+  seen_genres: { genre: string; cards: number }[];
   taste: TasteProfile;
 }
 
