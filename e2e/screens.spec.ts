@@ -175,7 +175,7 @@ test("flow: play something random", async ({ page }) => {
     "spotify:track:t101",
     "spotify:track:t102",
   ]);
-  await expect(page.getByText(/2 songs ready in “Studio Random”/)).toBeVisible();
+  await expect(page.getByText(/2 new songs in “Studio Random”/)).toBeVisible();
   // Music is playing on the phone: the new list starts there, from the top.
   await expect(page.getByRole("link", { name: "Open in Spotify" })).toHaveAttribute(
     "href",
@@ -196,6 +196,9 @@ test("flow: play something random", async ({ page }) => {
   expect(input.blocked.map((b) => b.title)).toEqual(
     expect.arrayContaining(["Long Way Round", "Open Window"]),
   );
+  // The fake Claude only knows these two songs: nothing new, so nothing old is put back.
+  await expect(page.getByText(/Géza found no new songs for this sound/)).toBeVisible();
+  expect(player.plays).toHaveLength(1);
 });
 
 test("09 loading animation while playlists are created", async ({ page }) => {
@@ -328,7 +331,7 @@ test("flow: rate the random picks, and it counts like a swipe", async ({ page })
   await seed(page, { loggedIn: true, claudeKey: true, playlists: true });
   await open(page, "./#/random");
   await page.getByRole("button", { name: "Pick 20 songs" }).click();
-  await expect(page.getByText(/2 songs ready in “Studio Random”/)).toBeVisible();
+  await expect(page.getByText(/2 new songs in “Studio Random”/)).toBeVisible();
   await expect(page.getByText("Long Way Round")).toBeVisible();
   const added = page.waitForRequest(
     (r) => r.method() === "POST" && /\/playlists\/[^/]+\/items$/.test(r.url()),

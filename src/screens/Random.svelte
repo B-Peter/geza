@@ -12,7 +12,7 @@ import Radar from "../ui/Radar.svelte";
 
 let settings = $state<RandomSettings | null>(null);
 /** The last picks; they stay on screen until the next pick. */
-let ready = $state<{ found: number; picked: number; fresh: number; songs: Card[] } | null>(null);
+let ready = $state<{ found: number; picked: number; songs: Card[] } | null>(null);
 /** The Spotify device playing right now: "Play" starts the new list there, from the top. */
 let active = $state<spotify.Device | null>(null);
 
@@ -80,7 +80,7 @@ async function pick() {
   });
   if (result) {
     settings = result.settings;
-    ready = { found: result.found, picked: result.picked, fresh: result.fresh, songs: result.songs };
+    ready = { found: result.found, picked: result.picked, songs: result.songs };
     void findActive();
     verdicts = {};
   }
@@ -91,7 +91,7 @@ async function pick() {
 
 <main class="screen">
   <h1>Play something</h1>
-  <p class="lead">Set the sound, and Géza picks {RANDOM_SIZE} songs for right now. Your mixes stay as they are.</p>
+  <p class="lead">Set the sound, and Géza picks {RANDOM_SIZE} songs for right now, every time songs no random playlist had before. Your mixes stay as they are.</p>
 
   {#if settings}
     <div class="label">Start from</div>
@@ -143,9 +143,8 @@ async function pick() {
 <div class="actions">
   {#if ready && settings?.playlistId}
     <p class="small muted center">
-      {ready.found} songs ready in “Studio Random”{ready.fresh < ready.found ? `, ${ready.fresh} of them new` : ""}{ready.found <
-      ready.picked
-        ? ` (${ready.picked - ready.found} not on Spotify)`
+      {ready.found} new songs in “Studio Random”{ready.found < RANDOM_SIZE
+        ? `: Géza found no more new ones for this sound`
         : ""}.
     </p>
     <div class="two">

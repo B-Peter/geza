@@ -18,19 +18,21 @@ export interface RandomSettings {
   note: string;
   /** The reusable Spotify playlist; null until first used. */
   playlistId: string | null;
-  /** Songs of the last few picks, newest first: the next pick avoids them. */
+  /** Every song a random playlist has had, newest first: none of them comes back. */
   recent?: { artist: string; title: string }[];
 }
 
-/** How many songs of earlier picks the next pick stays away from (three picks' worth). */
-const RECENT_MAX = 60;
+/** How many earlier random songs are remembered (and never picked again). */
+const RECENT_MAX = 2000;
+/** Of those, how many are listed to Claude; the rest are only filtered out here. */
+const RECENT_SENT = 200;
+/** Extra rounds of picking when too few songs were new and on Spotify. */
+const EXTRA_ROUNDS = 2;
 
 export interface RandomResult {
   settings: RandomSettings;
   picked: number;
   found: number;
-  /** Songs that weren't in the playlist's last picks. */
-  fresh: number;
   /** What went into the playlist, in order, with Claude's reasons and tags. */
   songs: Card[];
 }
@@ -49,6 +51,11 @@ export async function saveRandom(settings: RandomSettings): Promise<void> {
 }
 
 const ref = (t: { artist: string; title: string }) => ({ artist: t.artist, title: t.title });
+/** Back from a songKey ("artist|title", normalised) to a reference Claude can read. */
+const fromKey = (key: string) => {
+  const [artist = "", title = ""] = key.split("|");
+  return { artist, title };
+};
 
 async function createRandomPlaylist(profile: Profile): Promise<string> {
   const playlist = await spotify.createPlaylist(
@@ -74,17 +81,17 @@ export async function prepareRandom(
 
   const trained = trainSignals(await loadTrain());
   onProgress("Géza is picking songs…");
-  // The same sound and note would bring the same songs back: last picks are off limits.
+  // A random playlist is all new: no song any earlier one had, ever.
   const recent = settings.recent ?? [];
   const avoid = [...trained.blocked, ...recent];
   const input: CurateInput = {
-    mix: "Random, for right now. Different songs from last time: nothing in blocked",
+    mix: "Random, for right now. Every song must be new: none in blocked, and none Géza picked for an earlier random playlist",
     mode: "renew",
     remove_count: 0,
     add_count: RANDOM_SIZE,
     tune: settings.tune,
     loved: [...trained.loved, ...topTracks.map(ref)].slice(0, 40),
-    blocked: avoid,
+    blocked: [...trained.blocked, ...recent.slice(0, RECENT_SENT)],
     taste: trained.taste,
     locked: [],
     current: [],
@@ -98,16 +105,17 @@ export async function prepareRandom(
   let { add, missing } = filterAdditions(resolved, [], [], avoid, RANDOM_SIZE);
   const named = new Set(picks.add.map((p) => songKey(p.artist, p.title)));
 
-  // One replacement round for picks that weren't found or were unusable.
-  const short = RANDOM_SIZE - add.length;
-  if (short > 0) {
+  // More rounds for picks that weren't new or weren't on Spotify.
+  for (let round = 0; round < EXTRA_ROUNDS && add.length < RANDOM_SIZE; round++) {
+    const short = RANDOM_SIZE - add.length;
     onProgress(`Géza is picking ${short} more…`);
     const retry = await curate(
       {
         ...input,
         add_count: short,
         current: add.map((a) => ref(a.track)),
-        blocked: [...input.blocked, ...missing.map(ref)],
+        // Whatever was named already, kept or not, must not come again.
+        blocked: [...input.blocked, ...[...named].map(fromKey), ...missing.map(ref)],
       },
       "low",
     ).catch(() => ({ add: [], remove: [] }));
@@ -124,18 +132,10 @@ export async function prepareRandom(
     add = [...add, ...extra.add];
     missing = [...missing, ...extra.missing];
   }
-  // Still short: songs from earlier picks are better than a half-empty playlist.
-  if (add.length < RANDOM_SIZE) {
-    const again = filterAdditions(
-      resolved,
-      add.map((a) => a.track),
-      [],
-      trained.blocked,
-      RANDOM_SIZE - add.length,
+  if (add.length === 0)
+    throw new Error(
+      "Géza found no new songs for this sound this time. Try again, or change the sound or the note.",
     );
-    add = [...add, ...again.add];
-  }
-  if (add.length === 0) throw new Error("None of Géza's picks were found on Spotify. Try again.");
   const uris = add.map((a) => (a.track as Track).uri);
   const tagsOf = new Map(resolved.map((r) => [r.track?.id ?? "", (r.pick.tags ?? []).slice(0, 4)]));
   const songs: Card[] = add.map((a) => ({
@@ -155,11 +155,9 @@ export async function prepareRandom(
     await spotify.replacePlaylistTracks(playlistId, uris);
   }
 
-  const before = new Set(recent.map((s) => songKey(s.artist, s.title)));
-  const fresh = add.filter((a) => !before.has(songKey(a.track.artist, a.track.title))).length;
   const picked = add.map((a) => ref(a.track));
   const next = { ...settings, playlistId, recent: [...picked, ...recent].slice(0, RECENT_MAX) };
   await saveRandom(next);
   // "picked" counts the different songs Claude named over both rounds.
-  return { settings: next, picked: Math.max(named.size, add.length), found: add.length, fresh, songs };
+  return { settings: next, picked: Math.max(named.size, add.length), found: add.length, songs };
 }
