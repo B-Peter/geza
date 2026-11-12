@@ -70,7 +70,7 @@ const first = $derived(app.mixes[0]);
     <div class="card reconnect" role="status">
       <div class="reconnect-title">Reconnect Spotify</div>
       <p class="small muted">
-        Géza needs a new Spotify permission: it can now learn from what you heart and play. Spotify needs you to
+        Géza needs a new Spotify permission: he can now learn from what you heart and play. Spotify needs you to
         confirm that once.
       </p>
       <button class="btn small" onclick={() => spotify.startLogin().catch((e) => app.notify(e))}>Reconnect Spotify</button>
@@ -106,7 +106,7 @@ const first = $derived(app.mixes[0]);
         {waiting.length === app.mixes.length ? "Your mixes are empty" : waiting.length === 1 ? `${waiting[0]?.name} is empty` : `${waiting.length} mixes are empty`}
       </div>
       <p class="small muted">
-        Claude picks 25 songs for {waiting.length === 1 ? "it" : "each"}, from your listening and your swipes. It runs in
+        Géza picks 25 songs for {waiting.length === 1 ? "it" : "each"}, from your listening and your swipes. It runs in
         the background.
       </p>
       <button class="btn small" onclick={() => app.fillEmpty(waiting.map((m) => m.id))}>
@@ -149,7 +149,7 @@ const first = $derived(app.mixes[0]);
     <span class="ico"><Icon name="sparkle" size={20} /></span>
     <span class="grow">
       <span class="title">Play something random</span>
-      <span class="small muted">Set a sound, Claude picks songs for right now</span>
+      <span class="small muted">Set a sound, Géza picks songs for right now</span>
     </span>
     <Icon name="arrow" size={20} />
   </a>

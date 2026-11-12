@@ -104,7 +104,7 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
     ...signals(await loadLedger(mix.id), current, Date.now()),
   };
 
-  onProgress("Claude is picking songs…");
+  onProgress("Géza is picking songs…");
   const picks = await curate(input);
   const removals = matchRemovals(picks.remove, current, mix.locked, counts.remove);
   onProgress("Finding the songs on Spotify…");
@@ -115,7 +115,7 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
   // One replacement round for picks that weren't found or were unusable.
   const short = counts.add - add.length;
   if (short > 0) {
-    onProgress(`Asking Claude for ${short} replacement${short === 1 ? "" : "s"}…`);
+    onProgress(`Géza is picking ${short} more…`);
     const retry = await curate({
       ...input,
       remove_count: 0,
@@ -132,7 +132,7 @@ export async function prepareSwap(mix: Mix, onProgress: Progress = () => {}): Pr
 
   // Claude may name fewer usable removals than asked: then fewer songs go in too.
   add = capAdditions(add, removals, current);
-  if (add.length === 0) throw new Error("None of Claude's picks could be used. Try again.");
+  if (add.length === 0) throw new Error("None of Géza's picks could be used. Try again.");
 
   const swap: PendingSwap = {
     mixId: mix.id,

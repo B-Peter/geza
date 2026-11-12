@@ -121,9 +121,26 @@ test("train: MusicBrainz adds the original year, origin and genres", async ({ pa
   expect(first.tags).toEqual(expect.arrayContaining(["indie rock", "driving", "1990s", "britpop"]));
 });
 
-test("train: with several devices you pick one, and Géza remembers it", async ({ page }) => {
+test("train: plays where music is playing right now, without asking", async ({ page }) => {
   player.list = [
     { id: "mac1", name: "MacBook", type: "Computer", is_active: true },
+    { id: "phone1", name: "iPhone", type: "Smartphone", is_active: false },
+  ];
+  await seed(page, ready);
+  // Even with another device picked before: the one playing now wins.
+  await page.evaluate(() => localStorage.setItem("ps.trainDevice", "phone1"));
+  await open(page, "./#/train");
+  await page.getByRole("button", { name: "Start a deck" }).click();
+  await expect(page.getByText(/Playing on MacBook · started in \d\.\d s/)).toBeVisible();
+  await expect(page.getByRole("region", { name: "Where should the deck play?" })).toHaveCount(0);
+  // Already the active device: no wake-up transfer, it plays straight away.
+  expect(player.transfers).toEqual([]);
+  expect(player.plays[0]?.device).toBe("mac1");
+});
+
+test("train: with several devices and none playing you pick one, and Géza remembers it", async ({ page }) => {
+  player.list = [
+    { id: "mac1", name: "MacBook", type: "Computer", is_active: false },
     { id: "phone1", name: "iPhone", type: "Smartphone", is_active: false },
     { id: "tv1", name: "Living room TV", type: "TV", is_active: false, is_restricted: true } as never,
   ];
@@ -132,15 +149,13 @@ test("train: with several devices you pick one, and Géza remembers it", async (
   await page.getByRole("button", { name: "Start a deck" }).click();
   const picker = page.getByRole("region", { name: "Where should the deck play?" });
   await expect(picker).toBeVisible();
-  await expect(picker.getByRole("button", { name: /MacBook.*Computer · active now/ })).toBeVisible();
   // A device Spotify won't let apps control can't be picked.
   await expect(picker.getByRole("button", { name: /Living room TV/ })).toBeDisabled();
   await picker.getByRole("button", { name: /MacBook/ }).click();
   await expect(page.getByText(/Playing on MacBook · started in \d\.\d s/)).toBeVisible();
-  // Already the active device: no wake-up transfer, it plays straight away.
-  expect(player.transfers).toEqual([]);
-  expect(player.plays[0]?.device).toBe("mac1");
+  expect(player.plays.at(-1)?.device).toBe("mac1");
   // Next time it goes straight to the MacBook.
+  player.list = player.list.map((d) => ({ ...d, is_active: false }));
   await open(page, "./#/train");
   await page.getByRole("button", { name: "Start a deck" }).click();
   await expect(page.getByText(/Playing on MacBook · started in/)).toBeVisible();
@@ -210,7 +225,7 @@ test("train: a silent device sends you to Spotify; the device you start there ta
   expect(await page.evaluate(() => localStorage.getItem("ps.trainDevice"))).toBe("phone1");
 });
 
-test("train: one real song per artist Claude names; the start screen shows how the last deck went", async ({
+test("train: one real song per artist Géza names; the start screen shows how the last deck went", async ({
   page,
 }) => {
   await seed(page, ready);

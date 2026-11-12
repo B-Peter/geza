@@ -1,4 +1,4 @@
-import { expect, open, seed, snap, test } from "./fixtures.js";
+import { expect, open, player, seed, snap, test } from "./fixtures.js";
 
 test.afterEach(({ errors }) => {
   expect(errors, "console errors").toEqual([]);
@@ -176,9 +176,25 @@ test("flow: play something random", async ({ page }) => {
     "spotify:track:t102",
   ]);
   await expect(page.getByText(/2 songs ready in “Studio Random”/)).toBeVisible();
-  await expect(page.getByRole("link", { name: "Play in Spotify" })).toHaveAttribute(
+  // Music is playing on the phone: the new list starts there, from the top.
+  await expect(page.getByRole("link", { name: "Open in Spotify" })).toHaveAttribute(
     "href",
     "spotify:playlist:pl-studio-random",
+  );
+  await page.getByRole("button", { name: "Play on iPhone" }).click();
+  await expect(page.getByText("Playing “Studio Random” on iPhone.")).toBeVisible();
+  expect(player.plays.at(-1)).toMatchObject({
+    device: "phone1",
+    context: "spotify:playlist:pl-studio-random",
+  });
+
+  // Picking again with the same sound brings different songs, not the same list.
+  const again = page.waitForRequest((r) => r.method() === "POST" && r.url().includes("api.anthropic.com"));
+  await page.getByRole("button", { name: "Pick again" }).click();
+  const sent = (await again).postDataJSON() as { messages: { content: string }[] };
+  const input = JSON.parse(sent.messages[0]?.content ?? "{}") as { blocked: { title: string }[] };
+  expect(input.blocked.map((b) => b.title)).toEqual(
+    expect.arrayContaining(["Long Way Round", "Open Window"]),
   );
 });
 

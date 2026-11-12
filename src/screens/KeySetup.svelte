@@ -25,7 +25,7 @@ async function save() {
 <main class="screen">
   {#if !changing}<span class="chip"><Icon name="check" size={14} />Spotify linked · step 2 of 3</span>{/if}
   <h1 class="title">{changing ? "Change your Claude key" : "Add your Claude key"}</h1>
-  <p class="lead">Claude picks your songs using your own Anthropic API key. Usage is billed to your Anthropic account.</p>
+  <p class="lead">Géza picks your songs with Claude, Anthropic's AI, using your own API key. Usage is billed to your Anthropic account.</p>
 
   <div class="label">Get a key</div>
   <ol class="card steps">

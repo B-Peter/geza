@@ -460,7 +460,7 @@ export async function buildDeck(
   onProgress("Reading your listening…");
   const listening = await readListening();
   const t1 = performance.now();
-  onProgress("Claude is picking artists to discover…");
+  onProgress("Géza is picking artists to discover…");
   const judged = uniqueNames(
     [
       ...avoid.map((c) => c.track.artist),
@@ -583,7 +583,7 @@ export async function buildDeck(
     const restCards = await finish();
     if (restCards.length === 0) {
       if (failure) throw failure instanceof Error ? failure : new Error(String(failure));
-      throw new Error("None of Claude's picks were found on Spotify. Try again.");
+      throw new Error("None of Géza's picks were found on Spotify. Try again.");
     }
     return { ...deck, cards: restCards, asked: stats.asked, found: stats.found };
   }

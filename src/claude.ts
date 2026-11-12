@@ -229,20 +229,21 @@ async function ask<T>(
   } catch (e) {
     throw new Error(describeError(e));
   }
-  if (response.stop_reason === "refusal") throw new Error("Claude declined this request.");
-  if (response.stop_reason === "max_tokens") throw new Error("Claude's answer was cut off. Try again.");
+  if (response.stop_reason === "refusal")
+    throw new Error("Géza couldn't get an answer for this one. Try again.");
+  if (response.stop_reason === "max_tokens") throw new Error("Géza's answer was cut off. Try again.");
   const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
   try {
     return JSON.parse(text) as T;
   } catch {
-    throw new Error("Claude returned invalid JSON.");
+    throw new Error("Géza got a garbled answer. Try again.");
   }
 }
 
 export async function curate(input: CurateInput, effort: Effort = "medium"): Promise<Picks> {
   const picks = await ask<Picks>(SYSTEM_PROMPT, input, PICKS_SCHEMA, effort);
   if (!Array.isArray(picks?.add) || !Array.isArray(picks?.remove)) {
-    throw new Error("Claude's answer didn't match the expected shape.");
+    throw new Error("Géza got a garbled answer. Try again.");
   }
   return picks;
 }
@@ -405,7 +406,8 @@ export async function streamArtists(
     const stream = client(apiKey).messages.stream(request(DECK_PROMPT, input, ARTISTS_SCHEMA, effort));
     stream.on("text", take);
     const message = await stream.finalMessage();
-    if (message.stop_reason === "refusal") throw new Error("Claude declined this request.");
+    if (message.stop_reason === "refusal")
+      throw new Error("Géza couldn't get an answer for this one. Try again.");
   } catch (e) {
     // A connection that broke midway: what already arrived still counts.
     if (picks.length > 0) return picks;

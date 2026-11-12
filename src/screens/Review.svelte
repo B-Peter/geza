@@ -66,7 +66,7 @@ async function discard() {
     </p>
     <span class="chip found">
       <Icon name="sparkle" size={15} />
-      Picked by Claude · {swap.found === swap.picked ? "all found on Spotify" : `${swap.found} of ${swap.picked} found on Spotify`}
+      Picked by Géza · {swap.found === swap.picked ? "all found on Spotify" : `${swap.found} of ${swap.picked} found on Spotify`}
     </span>
 
     {#if swap.remove.length}

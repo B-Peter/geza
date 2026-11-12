@@ -139,20 +139,17 @@ async function loadDevices(): Promise<void> {
 }
 
 /**
- * Use the device you picked before if Spotify still lists it; with exactly
- * one usable device, use that; otherwise open the picker. After a failed
- * start (`awake`), the device that is active right now wins instead: it's
- * the one you just pressed play on, and the remembered one didn't answer.
+ * Where the deck plays: the device that is playing right now; else the one
+ * you picked before, if Spotify still lists it; else the only one there is;
+ * else you pick.
  */
-async function findDevice(awake = false): Promise<boolean> {
+async function findDevice(): Promise<boolean> {
   await loadDevices();
   const usable = devices.filter((d) => !d.is_restricted);
   const saved = usable.find((d) => d.id === localStorage.getItem(DEVICE_KEY));
   const active = usable.find((d) => d.is_active);
   const only = usable.length === 1 ? usable[0] : undefined;
-  device = (awake ? (active ?? saved) : (saved ?? active)) ?? only ?? null;
-  // No saved choice yet and several devices: you pick (once).
-  if (!awake && !saved && usable.length > 1) device = null;
+  device = active ?? saved ?? only ?? null;
   blocked = devices.length === 0 ? "spotify" : null;
   choosing = devices.length > 0 && !device;
   return Boolean(device);
@@ -347,7 +344,7 @@ async function start() {
 }
 
 async function retrySpotify() {
-  if (await findDevice(true)) void playFrom(index);
+  if (await findDevice()) void playFrom(index);
 }
 
 // Coming back from the Spotify app: try again on its own.
@@ -651,7 +648,7 @@ $effect(() => {
   {:else if more && deck.length > 0 && index >= deck.length}
     <div class="card notice center" role="status">
       <div class="notice-title">More songs on the way…</div>
-      <p class="small muted">Claude is still picking the rest of this deck.</p>
+      <p class="small muted">Géza is still picking the rest of this deck.</p>
     </div>
   {:else if done}
     <div class="card notice center">
@@ -675,7 +672,7 @@ $effect(() => {
     </div>
   {:else if !blocked && !choosing}
     <p class="lead">
-      Claude names artists you probably don't know; Spotify supplies a real song by each. {DECK_SIZE} per deck, each
+      Géza picks artists you probably don't know; Spotify supplies a real song by each. {DECK_SIZE} per deck, each
       starting at its catchy part. You stay in Géza; the sound comes from your Spotify app.
     </p>
     <div class="card rules">
@@ -688,7 +685,7 @@ $effect(() => {
       <span class="badge keep"><Icon name="check" size={18} /></span>
       <span class="grow">
         <strong>What Géza learned</strong><br />
-        <span class="small muted">Genres, eras, artists it thinks you like; switch off any it got wrong</span>
+        <span class="small muted">Genres, eras, artists he thinks you like; switch off any he got wrong</span>
       </span>
       <Icon name="arrow" size={18} />
     </a>
@@ -710,7 +707,7 @@ $effect(() => {
           Last deck: {lastDeck.found} of {lastDeck.asked} artists on Spotify · {lastDeck.size} songs · {lastDeck.yes} yes,
           {lastDeck.no} no
           {#if lastDeck.ms}
-            · first cards in {(lastDeck.ms.total / 1000).toFixed(1)} s (Claude {(lastDeck.ms.claude / 1000).toFixed(1)} s,
+            · first cards in {(lastDeck.ms.total / 1000).toFixed(1)} s (picking {(lastDeck.ms.claude / 1000).toFixed(1)} s,
             Spotify {((lastDeck.ms.listening + lastDeck.ms.spotify) / 1000).toFixed(1)} s{lastDeck.ms.waited
               ? `, of which ${(lastDeck.ms.waited / 1000).toFixed(0)} s waiting for Spotify's rate limit`
               : ""})

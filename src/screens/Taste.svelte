@@ -26,7 +26,7 @@ const profile = $derived(buildTaste(history, { muted: [...muted] }));
 const dims = $derived(explain(history));
 
 const sections: { dim: Dimension; title: string; hint: string }[] = [
-  { dim: "tag", title: "Genres and moods", hint: "From Claude's labels and MusicBrainz genres" },
+  { dim: "tag", title: "Genres and moods", hint: "From Géza's labels and MusicBrainz genres" },
   { dim: "era", title: "Eras", hint: "The decade each song first came out" },
   { dim: "artist", title: "Artists", hint: "Only artists you swiped more than once" },
   { dim: "country", title: "Where artists are from", hint: "From MusicBrainz" },
@@ -78,7 +78,7 @@ const readouts = $derived(
     <p class="lead">Loading…</p>
   {:else if profile.judged < MIN_JUDGED}
     <p class="lead">
-      Nothing yet: Géza needs at least {MIN_JUDGED} swipes in Discover before it reads anything into them.
+      Nothing yet: Géza needs at least {MIN_JUDGED} swipes in Discover before he reads anything into them.
     </p>
     <a class="btn" href="#/train">Open Discover</a>
   {:else}

@@ -12,7 +12,25 @@ import Radar from "../ui/Radar.svelte";
 
 let settings = $state<RandomSettings | null>(null);
 /** The last picks; they stay on screen until the next pick. */
-let ready = $state<{ found: number; picked: number; songs: Card[] } | null>(null);
+let ready = $state<{ found: number; picked: number; fresh: number; songs: Card[] } | null>(null);
+/** The Spotify device playing right now: "Play" starts the new list there, from the top. */
+let active = $state<spotify.Device | null>(null);
+
+async function findActive() {
+  const list = await spotify.getDevices().catch(() => []);
+  active = list.find((d) => d.is_active && !d.is_restricted) ?? null;
+}
+
+/** Start the new list on the device that is playing, so its old queue doesn't carry on. */
+async function playHere() {
+  if (!active || !settings?.playlistId) return;
+  try {
+    await spotify.playInPlaylist(active.id, settings.playlistId, 0, 0);
+    app.notify(`Playing “Studio Random” on ${active.name}.`, "ok");
+  } catch (e) {
+    app.notify(e);
+  }
+}
 /** Your verdict per track id, for the list below the picks. */
 let verdicts = $state<Record<string, Verdict>>({});
 let train = $state<TrainData | null>(null);
@@ -62,7 +80,8 @@ async function pick() {
   });
   if (result) {
     settings = result.settings;
-    ready = { found: result.found, picked: result.picked, songs: result.songs };
+    ready = { found: result.found, picked: result.picked, fresh: result.fresh, songs: result.songs };
+    void findActive();
     verdicts = {};
   }
 }
@@ -72,7 +91,7 @@ async function pick() {
 
 <main class="screen">
   <h1>Play something</h1>
-  <p class="lead">Set the sound, and Claude picks {RANDOM_SIZE} songs for right now. Your weekly mixes stay as they are.</p>
+  <p class="lead">Set the sound, and Géza picks {RANDOM_SIZE} songs for right now. Your mixes stay as they are.</p>
 
   {#if settings}
     <div class="label">Start from</div>
@@ -124,14 +143,22 @@ async function pick() {
 <div class="actions">
   {#if ready && settings?.playlistId}
     <p class="small muted center">
-      {ready.found} songs ready in “Studio Random”{ready.found < ready.picked
+      {ready.found} songs ready in “Studio Random”{ready.fresh < ready.found ? `, ${ready.fresh} of them new` : ""}{ready.found <
+      ready.picked
         ? ` (${ready.picked - ready.found} not on Spotify)`
         : ""}.
     </p>
     <div class="two">
       <button class="btn secondary" onclick={pick} disabled={!!app.busy}>Pick again</button>
-      <a class="btn" href={openUri(settings.playlistId)}><Icon name="play" size={18} />Play in Spotify</a>
+      {#if active}
+        <button class="btn" onclick={playHere}><Icon name="play" size={18} />Play on {active.name}</button>
+      {:else}
+        <a class="btn" href={openUri(settings.playlistId)}><Icon name="play" size={18} />Play in Spotify</a>
+      {/if}
     </div>
+    {#if active}
+      <a class="open small" href={openUri(settings.playlistId)}>Open in Spotify</a>
+    {/if}
   {:else}
     <button class="btn" onclick={pick} disabled={!settings || !!app.busy}>
       {app.busy ?? `Pick ${RANDOM_SIZE} songs`}
@@ -150,6 +177,7 @@ async function pick() {
   .notebox { margin-top: 14px; padding: 14px; }
   .notebox label { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; margin-bottom: 10px; }
   .center { text-align: center; margin: 0 0 10px; }
+  .open { display: flex; justify-content: center; align-items: center; min-height: 44px; font-weight: 600; text-decoration: underline; }
   .two { display: grid; grid-template-columns: 1fr 1.3fr; gap: 10px; }
   .pick .grow { flex: 1; min-width: 0; }
   .pick .title { font-size: 14px; line-height: 18px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

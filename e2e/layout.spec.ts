@@ -52,7 +52,7 @@ const SCREENS: Screen[] = [
     path: "./#/train",
     ready: async (p) => {
       player.list = [
-        { id: "mac1", name: "MacBook Pro", type: "Computer", is_active: true },
+        { id: "mac1", name: "MacBook Pro", type: "Computer", is_active: false },
         { id: "phone1", name: "Peter's iPhone", type: "Smartphone", is_active: false },
       ];
       await p.getByRole("button", { name: "Start a deck" }).click();

@@ -151,10 +151,10 @@ async function undo() {
 
     <div class="label">Sound</div>
     <Radar tune={mix.tune} onchange={(tune) => app.updateMix(id, { tune })} label={`Sound of ${mix.name}`} />
-    <p class="small muted hint">Claude aims for this sound in the next swap.</p>
+    <p class="small muted hint">Géza aims for this sound in the next swap.</p>
 
     <div class="card notebox">
-      <label for="note"><Icon name="sparkle" size={18} />Note for Claude</label>
+      <label for="note"><Icon name="sparkle" size={18} />Note for Géza</label>
       <input
         id="note"
         class="field"
@@ -162,7 +162,7 @@ async function undo() {
         bind:value={note}
         onchange={() => app.updateMix(id, { note: note.trim() })}
       />
-      <p class="small muted">Claude reads this the next time it picks.</p>
+      <p class="small muted">Géza reads this the next time he picks.</p>
     </div>
   </div>
 </main>
